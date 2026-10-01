@@ -343,6 +343,9 @@ export default function Setup({ url, error, onStart, onBack }: SetupProps) {
         pdf_style: selectedPDF,
         pdf_page_size: pdfPageSize,
         include_timestamps: includeTimestamps,
+        generate_key_points: generateKeyPoints,
+        include_topic_headings: includeTopicHeadings,
+        detect_topics: detectTopics,
       });
     } finally {
       setStarting(false);

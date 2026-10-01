@@ -10,6 +10,8 @@ export interface JobFrame {
   url?: string;
   included?: boolean;
   note?: string | null;
+  heading?: string | null;
+  key_points?: string[];
 }
 
 export interface Job {
@@ -21,6 +23,8 @@ export interface Job {
   progress: number;
   step: number;
   error: string | null;
+  warning: string | null;
+  summary: string | null;
   frames: JobFrame[];
   has_pdf: boolean;
 }
@@ -37,6 +41,9 @@ export interface JobSettings {
   pdf_style: string;
   pdf_page_size: string;
   include_timestamps: boolean;
+  generate_key_points: boolean;
+  include_topic_headings: boolean;
+  detect_topics: boolean;
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -55,17 +62,26 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   } catch {
     throw new Error('Cannot reach the LectureLeaf server. Is the backend running?');
   }
+  if (res.status === 401) {
+    // The session is no longer valid: send the user back to the login page.
+    await supabase.auth.signOut();
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => null);
     const detail = body?.detail;
-    throw new Error(typeof detail === 'string' ? detail : `Request failed (${res.status})`);
+    throw new Error(typeof detail === 'string' ? detail : res.status === 429 ? 'Too many requests. Please wait a moment.' : `Request failed (${res.status})`);
   }
   return res.json() as Promise<T>;
 }
 
 export const api = {
+  signUp: (email: string, password: string) =>
+    request<{ ok: boolean }>('/api/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   createJob: (url: string, settings: JobSettings) =>
     request<{ id: string }>('/api/jobs', { method: 'POST', body: JSON.stringify({ url, settings }) }),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),
+  updateFrame: (id: string, index: number, patch: { included?: boolean; note?: string }) =>
+    request<{ ok: boolean }>(`/api/jobs/${id}/frames/${index}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  rebuildPdf: (id: string) => request<{ url: string }>(`/api/jobs/${id}/rebuild`, { method: 'POST' }),
   getPdfUrl: (id: string) => request<{ url: string }>(`/api/jobs/${id}/pdf`),
 };

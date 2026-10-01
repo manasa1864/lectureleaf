@@ -49,10 +49,12 @@ export default function Processing({ jobId, url, onComplete, onFail }: Processin
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>;
+    let failures = 0;
     const poll = async () => {
       try {
         const j = await api.getJob(jobId);
         if (cancelled) return;
+        failures = 0;
         setJob(j);
         if (j.status === 'done') {
           timer = setTimeout(() => onComplete(j), 600);
@@ -61,7 +63,8 @@ export default function Processing({ jobId, url, onComplete, onFail }: Processin
         if (j.status === 'error') return setError(j.error || 'Processing failed');
       } catch (err) {
         if (cancelled) return;
-        return setError(err instanceof Error ? err.message : 'Lost contact with the server');
+        // A few failed polls in a row are usually a network blip; only give up after several.
+        if (++failures >= 5) return setError(err instanceof Error ? err.message : 'Lost contact with the server');
       }
       timer = setTimeout(poll, 2000);
     };

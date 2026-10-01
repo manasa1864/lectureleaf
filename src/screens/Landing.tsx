@@ -217,10 +217,18 @@ const steps = [
 export default function Landing({ onGenerate, email, onSignOut }: LandingProps) {
   const [url, setUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
+  const [urlError, setUrlError] = useState('');
 
   // Needs a link first: with an empty field, bring the user to the input instead.
   const go = () => {
-    if (url.trim()) return onGenerate(url.trim());
+    if (url.trim()) {
+      if (!/^https?:\/\/((www|m|music)\.)?(youtube\.com|youtu\.be)\//i.test(url.trim())) {
+        setUrlError('Please paste a YouTube link (youtube.com or youtu.be).');
+        return;
+      }
+      setUrlError('');
+      return onGenerate(url.trim());
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
     inputRef.current?.focus({ preventScroll: true });
   };
@@ -288,7 +296,10 @@ export default function Landing({ onGenerate, email, onSignOut }: LandingProps) 
                   ref={inputRef}
                   type="url"
                   value={url}
-                  onChange={(e) => setUrl(e.target.value)}
+                  onChange={(e) => {
+                    setUrl(e.target.value);
+                    setUrlError('');
+                  }}
                   placeholder="Paste a YouTube lecture link..."
                   className="flex-1 outline-none bg-transparent text-sm"
                   style={{ color: '#151515', fontFamily: 'Inter' }}
@@ -306,6 +317,9 @@ export default function Landing({ onGenerate, email, onSignOut }: LandingProps) 
               </button>
             </div>
 
+            {urlError && (
+              <p role="alert" className="text-sm mb-2" style={{ color: '#C05050', fontFamily: 'Inter' }}>{urlError}</p>
+            )}
             <p className="text-sm" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>
               No manual screenshots. No endless scrubbing.
             </p>

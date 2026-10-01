@@ -15,8 +15,25 @@ class Settings(BaseModel):
     pdf_style: str = "lecture"                        # minimal | lecture | revision | cornell
     pdf_page_size: str = "A4"                         # A4 | Letter | A5
     include_timestamps: bool = True
+    generate_key_points: bool = True
+    include_topic_headings: bool = True
+    detect_topics: bool = True
+
+    @property
+    def wants_text(self) -> bool:
+        return self.generate_key_points or self.include_topic_headings or self.detect_topics
 
 
 class JobCreate(BaseModel):
-    url: str
+    url: str = Field(max_length=500)
     settings: Settings = Settings()
+
+
+class FramePatch(BaseModel):
+    included: Optional[bool] = None
+    note: Optional[str] = Field(None, max_length=2000)
+
+
+class SignUp(BaseModel):
+    email: str = Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+    password: str = Field(min_length=6, max_length=72)

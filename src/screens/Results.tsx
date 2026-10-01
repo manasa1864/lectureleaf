@@ -37,25 +37,60 @@ const topics = [
 
 export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps) {
   const frames = job
-    ? job.frames.map((f) => ({ time: f.time, topic: `Moment ${f.index}`, desc: `Captured at ${f.time}`, src: f.url ?? '' }))
-    : demoFrames.map((f) => ({ ...f, src: `https://images.unsplash.com/${f.img}?w=400&h=240&fit=crop&auto=format` }));
+    ? job.frames.map((f) => ({
+        index: f.index,
+        time: f.time,
+        topic: f.heading || `Moment ${f.index}`,
+        points: f.key_points?.length ? f.key_points : [`Captured at ${f.time}`],
+        src: f.url ?? '',
+      }))
+    : demoFrames.map((f, i) => ({ index: i + 1, time: f.time, topic: f.topic, points: [f.desc], src: `https://images.unsplash.com/${f.img}?w=400&h=240&fit=crop&auto=format` }));
+  const hasTopics = !job || job.frames.some((f) => f.heading);
+  const liveTopics = frames.map((f, i) => ({
+    num: String(i + 1).padStart(2, '0'),
+    name: f.topic,
+    range: `${f.time} – ${frames[i + 1]?.time ?? 'end'}`,
+    count: 1,
+    src: f.src,
+  }));
+  const topicRows = job ? liveTopics : topics.map((t) => ({ ...t, src: `https://images.unsplash.com/${t.img}?w=112&h=80&fit=crop&auto=format` }));
   const [pdfError, setPdfError] = useState('');
 
   const downloadPdf = async () => {
     setPdfError('');
+    setDownloading(true);
     try {
-      const { url } = await api.getPdfUrl(job!.id);
+      // Frames were removed since the PDF was built, so rebuild it first.
+      const { url } = dirty ? await api.rebuildPdf(job!.id) : await api.getPdfUrl(job!.id);
+      setDirty(false);
       window.open(url, '_blank');
     } catch (err) {
       setPdfError(err instanceof Error ? err.message : 'Could not get the PDF');
+    } finally {
+      setDownloading(false);
     }
   };
 
-  const [kept, setKept] = useState(frames.map((_, i) => i));
+  const [kept, setKept] = useState(() =>
+    job ? job.frames.flatMap((f, i) => (f.included === false ? [] : [i])) : frames.map((_, i) => i),
+  );
+  const [dirty, setDirty] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const [activeTab, setActiveTab] = useState<'frames' | 'topics'>('frames');
 
   const toggleKeep = (i: number) => {
-    setKept((prev) => prev.includes(i) ? prev.filter((x) => x !== i) : [...prev, i]);
+    const nowKept = !kept.includes(i);
+    setKept((prev) => (nowKept ? [...prev, i] : prev.filter((x) => x !== i)));
+    if (!job) return;
+    setPdfError('');
+    api
+      .updateFrame(job.id, frames[i].index, { included: nowKept })
+      .then(() => setDirty(true))
+      .catch((err) => {
+        // Put the toggle back if it couldn't be saved.
+        setKept((prev) => (nowKept ? prev.filter((x) => x !== i) : [...prev, i]));
+        setPdfError(err instanceof Error ? err.message : 'Could not save that change');
+      });
   };
 
   return (
@@ -95,8 +130,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
           </button>
           <button
             onClick={downloadPdf}
-            disabled={!job?.has_pdf}
-            title={pdfError}
+            disabled={!job?.has_pdf || downloading || kept.length === 0}
             className="text-sm font-medium px-5 py-2 rounded-full transition-all flex items-center gap-2 disabled:opacity-50"
             style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = '#641E30')}
@@ -106,7 +140,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
               <path d="M7 2 L7 9 M4 6.5 L7 9 L10 6.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
               <line x1="2" y1="12" x2="12" y2="12" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
             </svg>
-            Download PDF
+            {downloading ? 'Preparing…' : 'Download PDF'}
           </button>
         </div>
       </div>
@@ -124,6 +158,17 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
           <p style={{ color: '#68645F', fontFamily: 'Inter' }}>
             We found {kept.length} useful visual moments from this lecture.
           </p>
+          {job?.summary && (
+            <p className="mt-4 text-sm leading-relaxed max-w-2xl" style={{ color: '#151515', fontFamily: 'Inter' }}>{job.summary}</p>
+          )}
+          {job?.warning && (
+            <p className="mt-4 text-xs p-3 rounded-lg max-w-2xl" style={{ background: '#F7EEEA', border: '1px solid #C5A46D', color: '#7A263A', fontFamily: 'Inter' }}>
+              {job.warning}
+            </p>
+          )}
+          {pdfError && (
+            <p role="alert" className="mt-4 text-sm" style={{ color: '#C05050', fontFamily: 'Inter' }}>{pdfError}</p>
+          )}
         </div>
 
         {/* Summary cards */}
@@ -147,7 +192,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
 
         {/* Tab switcher */}
         <div className="flex items-center gap-1 p-1 rounded-xl mb-6 w-fit" style={{ background: '#FFFDF9', border: '1px solid #E2DDD3' }}>
-          {([['frames', 'Captured moments'], ['topics', 'Topic structure']] as const).filter(([id]) => !job || id === 'frames').map(([id, label]) => (
+          {([['frames', 'Captured moments'], ['topics', 'Topic structure']] as const).filter(([id]) => id === 'frames' || hasTopics).map(([id, label]) => (
             <button
               key={id}
               onClick={() => setActiveTab(id)}
@@ -206,7 +251,11 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
                   </div>
                   <div className="p-3">
                     <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>{frame.topic}</span>
-                    <p className="text-xs mt-0.5 leading-snug" style={{ color: '#68645F', fontFamily: 'Inter' }}>{frame.desc}</p>
+                    <ul className="mt-1 space-y-1">
+                      {frame.points.map((pt, k) => (
+                        <li key={k} className="text-xs leading-snug" style={{ color: '#68645F', fontFamily: 'Inter' }}>{pt}</li>
+                      ))}
+                    </ul>
                   </div>
                 </div>
               ))}
@@ -216,7 +265,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
           <>
             <h2 className="text-base font-bold mb-4" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Your lecture, organized.</h2>
             <div className="space-y-3">
-              {topics.map((topic, i) => (
+              {topicRows.map((topic, i) => (
                 <div
                   key={i}
                   className="flex items-center gap-4 p-4 rounded-2xl transition-all"
@@ -227,7 +276,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
                   <span className="text-sm font-bold w-8 flex-shrink-0" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>{topic.num}</span>
                   <div className="w-14 h-10 rounded-lg overflow-hidden flex-shrink-0">
                     <img
-                      src={`https://images.unsplash.com/${topic.img}?w=112&h=80&fit=crop&auto=format`}
+                      src={topic.src}
                       alt={topic.name}
                       className="w-full h-full object-cover"
                     />

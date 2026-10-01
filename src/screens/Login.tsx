@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import Logo from '../components/Logo';
 import { supabase, supabaseConfigured } from '../lib/supabase';
+import { api } from '../lib/api';
 
 type Mode = 'signin' | 'signup';
 
@@ -17,28 +18,30 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('');
 
   const switchMode = (m: Mode) => {
     setMode(m);
     setError('');
-    setNotice('');
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
-    setNotice('');
     setBusy(true);
     try {
       if (mode === 'signin') {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
+        let { error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error && /not confirmed/i.test(error.message)) {
+          // Account made before confirmation was switched off: confirm it, then sign in again.
+          await api.signUp(email, password);
+          ({ error } = await supabase.auth.signInWithPassword({ email, password }));
+        }
         if (error) throw error;
       } else {
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        // The backend creates an already-confirmed account, so signing in works straight away.
+        await api.signUp(email, password);
+        const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
-        // With email confirmation on, there is no session until the link is clicked.
-        if (!data.session) setNotice('Check your email for a confirmation link, then sign in.');
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong');
@@ -120,11 +123,6 @@ export default function Login() {
           {error && (
             <p role="alert" className="text-xs" style={{ color: '#C05050', fontFamily: 'Inter' }}>
               {error}
-            </p>
-          )}
-          {notice && (
-            <p className="text-xs" style={{ color: '#7A263A', fontFamily: 'Inter' }}>
-              {notice}
             </p>
           )}
 

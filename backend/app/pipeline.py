@@ -1,31 +1,30 @@
-"""Download a lecture, pick its distinct visual moments, upload them and build the study PDF."""
+"""YouTube link -> distinct visual moments + transcript notes -> study PDF."""
+import json
+import logging
 import os
 import tempfile
-from urllib.parse import urlparse
+import time
+from concurrent.futures import ThreadPoolExecutor
 
 import cv2
 import numpy as np
-import yt_dlp
 
 from . import config
 from .db import get_client
-from .pdf import build_pdf
+from .errors import UserError
+from .groq import GroqError
+from .media import chunk_audio, download_audio, download_video, fetch_info
+from .notes import Section, Segment, build_notes, transcribe
+from .pdf import PdfFrame, build_pdf
 from .schemas import Settings
 
-YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
+log = logging.getLogger("lectureleaf.pipeline")
+
 SAMPLE_EVERY_S = 2.0
 MAX_FRAMES = {"compact": 8, "balanced": 16, "detailed": 40}
 
 # Indices match the steps shown on the Processing screen.
 STEP_LOADED, STEP_DETECTED, STEP_CLEANED, STEP_ORGANIZING, STEP_PDF = range(5)
-
-
-def is_youtube_url(url: str) -> bool:
-    try:
-        p = urlparse(url)
-    except ValueError:
-        return False
-    return p.scheme in ("http", "https") and (p.hostname or "").lower() in YOUTUBE_HOSTS
 
 
 def fmt_time(seconds: float) -> str:
@@ -39,28 +38,7 @@ def update(job_id: str, **fields) -> None:
     get_client().table("jobs").update(fields).eq("id", job_id).execute()
 
 
-def download(url: str, tmp: str) -> tuple[str, str, float]:
-    opts = {
-        # Frames only need the picture. YouTube serves video and audio separately, so ask for a
-        # video-only H.264 stream (OpenCV decodes it reliably) and fall back to anything usable.
-        "format": "bv*[height<=480][vcodec^=avc1]/bv*[height<=480][ext=mp4]/bv*[height<=480]/b[height<=480]/b",
-        "outtmpl": os.path.join(tmp, "video.%(ext)s"),
-        "noplaylist": True,
-        "quiet": True,
-        "noprogress": True,
-        "no_warnings": True,
-    }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        duration = float(info.get("duration") or 0)
-        if duration > config.MAX_LECTURE_MINUTES * 60:
-            raise ValueError(f"Lecture is longer than {config.MAX_LECTURE_MINUTES} minutes")
-        ydl.download([url])
-    files = [f for f in os.listdir(tmp) if f.startswith("video.")]
-    if not files:
-        raise RuntimeError("Download failed")
-    return os.path.join(tmp, files[0]), info.get("title") or "Untitled lecture", duration
-
+# ─────────────────────────── frame detection ───────────────────────────
 
 def _small(frame: np.ndarray) -> np.ndarray:
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
@@ -82,43 +60,45 @@ def _good_quality(frame: np.ndarray, s: Settings) -> bool:
 def detect_moments(video: str, duration: float, s: Settings, on_progress) -> list[tuple[float, np.ndarray]]:
     cap = cv2.VideoCapture(video)
     if not cap.isOpened():
-        raise RuntimeError("Could not open downloaded video")
+        raise UserError("The downloaded video couldn't be opened.")
     if duration <= 0:
         fps = cap.get(cv2.CAP_PROP_FPS) or 25
         duration = (cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0) / fps
 
     change_thr = max(0.02 - 0.0002 * s.sensitivity, 0.004)  # more sensitive -> smaller change counts
-    dupe_thr = 0.00006 * s.dupe_sensitivity      # stricter -> wider "same as before" band
-    kept: list[tuple[float, np.ndarray, np.ndarray]] = []  # (time, full frame, small gray)
+    dupe_thr = 0.00006 * s.dupe_sensitivity                  # stricter -> wider "same as before" band
+    kept: list[tuple[float, np.ndarray, np.ndarray]] = []    # (time, full frame, small gray)
     prev_small = None
     last_t = -1e9
     t = 0.0
     last_reported = -1
-    while t < max(duration, SAMPLE_EVERY_S):
-        cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
-        ok, frame = cap.read()
-        if not ok:
-            break
-        small = _small(frame)
-        stable = prev_small is None or not s.skip_transitions or _diff(prev_small, small) < 0.002
-        prev_small = small
+    try:
+        while t < max(duration, SAMPLE_EVERY_S):
+            cap.set(cv2.CAP_PROP_POS_MSEC, t * 1000)
+            ok, frame = cap.read()
+            if not ok:
+                break
+            small = _small(frame)
+            stable = prev_small is None or not s.skip_transitions or _diff(prev_small, small) < 0.002
+            prev_small = small
 
-        if stable and _good_quality(frame, s):
-            if not kept:
-                kept.append((t, frame, small))
-                last_t = t
-            elif t - last_t >= s.min_time_between and _diff(kept[-1][2], small) > change_thr:
-                is_dupe = s.remove_dupes and any(_diff(k[2], small) < dupe_thr for k in kept)
-                if not is_dupe:
+            if stable and _good_quality(frame, s):
+                if not kept:
                     kept.append((t, frame, small))
                     last_t = t
-        if duration:
-            pct = int(min(t / duration, 1.0) * 10)
-            if pct != last_reported:
-                last_reported = pct
-                on_progress(pct / 10)
-        t += SAMPLE_EVERY_S
-    cap.release()
+                elif t - last_t >= s.min_time_between and _diff(kept[-1][2], small) > change_thr:
+                    is_dupe = s.remove_dupes and any(_diff(k[2], small) < dupe_thr for k in kept)
+                    if not is_dupe:
+                        kept.append((t, frame, small))
+                        last_t = t
+            if duration:
+                pct = int(min(t / duration, 1.0) * 10)
+                if pct != last_reported:
+                    last_reported = pct
+                    on_progress(pct / 10)
+            t += SAMPLE_EVERY_S
+    finally:
+        cap.release()
     return [(k[0], k[1]) for k in kept]
 
 
@@ -130,46 +110,147 @@ def limit_pages(moments: list, s: Settings) -> list:
     return [moments[i] for i in sorted(set(idx.tolist()))]
 
 
-def run_job(job_id: str, user_id: str, url: str, s: Settings) -> None:
+# ─────────────────────────── transcript (runs alongside frame detection) ───────────────────────────
+
+def fetch_transcript(url: str, tmp: str) -> tuple[list[Segment], str]:
+    """Never raises. Returns (segments, warning)."""
+    if not config.GROQ_API_KEY:
+        return [], "Transcription is turned off on this server, so the notes have no key points."
+    try:
+        audio = download_audio(url, os.path.join(tmp, "audio"))
+        chunks = chunk_audio(audio, os.path.join(tmp, "audio"))
+        segments = transcribe(chunks)
+        if not segments:
+            return [], "No speech was detected in this video, so the notes have no key points."
+        return segments, ""
+    except UserError as exc:
+        return [], f"{exc} The notes have no key points."
+    except GroqError as exc:
+        log.warning("transcription failed: %s", exc)
+        return [], "Transcription failed, so the notes have no key points."
+    except Exception:
+        log.exception("unexpected transcription failure")
+        return [], "Transcription failed, so the notes have no key points."
+
+
+# ─────────────────────────── job runner ───────────────────────────
+
+class Run:
+    """Mutable state for one job so a failure can clean up whatever was already stored."""
+
+    def __init__(self, job_id: str, user_id: str):
+        self.job_id, self.user_id = job_id, user_id
+        self.started = time.time()
+        self.uploaded: list[str] = []
+
+    def check_time(self) -> None:
+        if time.time() - self.started > config.MAX_JOB_MINUTES * 60:
+            raise UserError("Processing took too long and was stopped. Try a shorter lecture.")
+
+
+def _cleanup(run: Run) -> None:
     db = get_client()
     try:
-        update(job_id, status="processing", progress=3, step=STEP_LOADED)
-        with tempfile.TemporaryDirectory() as tmp:
-            video, title, duration = download(url, tmp)
-            update(job_id, title=title, duration_s=int(duration), progress=20, step=STEP_DETECTED)
+        db.table("job_frames").delete().eq("job_id", run.job_id).execute()
+        if run.uploaded:
+            db.storage.from_(config.STORAGE_BUCKET).remove(run.uploaded)
+    except Exception:
+        log.exception("cleanup failed for job %s", run.job_id)
 
-            moments = detect_moments(
-                video, duration, s, lambda frac: update(job_id, progress=20 + int(frac * 45))
-            )
-            update(job_id, progress=68, step=STEP_CLEANED)
-            moments = limit_pages(moments, s)
-            if not moments:
-                raise RuntimeError("No usable frames were found in this video")
-            update(job_id, progress=75, step=STEP_ORGANIZING)
 
-            bucket = db.storage.from_(config.STORAGE_BUCKET)
-            base = f"{user_id}/{job_id}"
-            frames, files = [], []
-            for i, (t, img) in enumerate(moments, 1):
-                local = os.path.join(tmp, f"frame_{i}.jpg")
-                cv2.imwrite(local, img, [cv2.IMWRITE_JPEG_QUALITY, 88])
-                remote = f"{base}/frame_{i}.jpg"
-                with open(local, "rb") as fh:
-                    bucket.upload(remote, fh.read(), {"content-type": "image/jpeg"})
-                frames.append({"index": i, "seconds": int(t), "time": fmt_time(t), "path": remote})
-                files.append((int(t), local))
+def _upload(run: Run, remote: str, data: bytes, content_type: str) -> None:
+    get_client().storage.from_(config.STORAGE_BUCKET).upload(
+        remote, data, {"content-type": content_type, "upsert": "true"}
+    )
+    run.uploaded.append(remote)
 
-            db.table("job_frames").insert([
-                {"job_id": job_id, "user_id": user_id, "position": f["index"], "seconds": f["seconds"],
-                 "time_label": f["time"], "storage_path": f["path"]}
-                for f in frames
-            ]).execute()
-            update(job_id, progress=88, step=STEP_PDF)
-            pdf_local = os.path.join(tmp, "notes.pdf")
-            build_pdf(pdf_local, title, files, s)
-            pdf_remote = f"{base}/notes.pdf"
-            with open(pdf_local, "rb") as fh:
-                bucket.upload(pdf_remote, fh.read(), {"content-type": "application/pdf"})
-        update(job_id, status="done", progress=100, step=STEP_PDF + 1, pdf_path=pdf_remote)
-    except Exception as exc:  # surface the reason to the UI
+
+def run_job(job_id: str, user_id: str, url: str, s: Settings) -> None:
+    run = Run(job_id, user_id)
+    try:
+        _run(run, url, s)
+    except UserError as exc:
+        _cleanup(run)
         update(job_id, status="error", error=str(exc)[:500])
+    except Exception:
+        log.exception("job %s failed", job_id)
+        _cleanup(run)
+        update(job_id, status="error", error="Something went wrong while processing this lecture. Please try again.")
+
+
+def _run(run: Run, url: str, s: Settings) -> None:
+    job_id, user_id = run.job_id, run.user_id
+    update(job_id, status="processing", progress=3, step=STEP_LOADED)
+    info = fetch_info(url)
+    title = info.get("title") or "Untitled lecture"
+    duration = float(info.get("duration") or 0)
+    update(job_id, title=title, duration_s=int(duration), progress=8)
+
+    warnings: list[str] = []
+    with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=1) as pool:
+        video = download_video(url, os.path.join(tmp, "video"))
+        update(job_id, progress=20, step=STEP_DETECTED)
+        transcript_future = pool.submit(fetch_transcript, url, tmp) if s.wants_text else None
+
+        def scan_progress(frac: float) -> None:
+            run.check_time()
+            update(job_id, progress=20 + int(frac * 40))
+
+        moments = detect_moments(video, duration, s, scan_progress)
+        update(job_id, progress=62, step=STEP_CLEANED)
+        moments = limit_pages(moments, s)
+        if not moments:
+            raise UserError("No usable frames were found in this video.")
+        if len(moments) == 1 and duration > 300:
+            warnings.append("Only one distinct frame was found. This video may not contain slides or visuals.")
+
+        update(job_id, progress=66, step=STEP_ORGANIZING)
+        times = [int(t) for t, _ in moments]
+        sections = [Section() for _ in moments]
+        summary = ""
+        segments: list[Segment] = []
+        if transcript_future:
+            segments, warn = transcript_future.result()
+            if warn:
+                warnings.append(warn)
+            run.check_time()
+            update(job_id, progress=74)
+            if segments:
+                sections, summary, warn = build_notes(title, times, segments, s.page_density)
+                if warn:
+                    warnings.append(warn)
+        update(job_id, progress=82)
+
+        base = f"{user_id}/{job_id}"
+        rows, pdf_frames = [], []
+        for i, ((t, img), sec) in enumerate(zip(moments, sections), 1):
+            local = os.path.join(tmp, f"frame_{i}.jpg")
+            cv2.imwrite(local, img, [cv2.IMWRITE_JPEG_QUALITY, 88])
+            remote = f"{base}/frame_{i}.jpg"
+            with open(local, "rb") as fh:
+                _upload(run, remote, fh.read(), "image/jpeg")
+            rows.append({
+                "job_id": job_id, "user_id": user_id, "position": i, "seconds": int(t),
+                "time_label": fmt_time(t), "storage_path": remote,
+                "heading": sec.heading or None, "key_points": sec.key_points,
+            })
+            pdf_frames.append(PdfFrame(int(t), local, sec.heading, sec.key_points))
+        get_client().table("job_frames").insert(rows).execute()
+
+        transcript_path = None
+        if segments:
+            transcript_path = f"{base}/transcript.json"
+            payload = json.dumps([{"start": g.start, "end": g.end, "text": g.text} for g in segments])
+            _upload(run, transcript_path, payload.encode("utf-8"), "application/json")
+
+        update(job_id, progress=90, step=STEP_PDF)
+        pdf_local = os.path.join(tmp, "notes.pdf")
+        build_pdf(pdf_local, title, pdf_frames, s, summary, int(duration))
+        pdf_remote = f"{base}/notes.pdf"
+        with open(pdf_local, "rb") as fh:
+            _upload(run, pdf_remote, fh.read(), "application/pdf")
+
+    update(
+        job_id, status="done", progress=100, step=STEP_PDF + 1, pdf_path=pdf_remote, summary=summary or None,
+        transcript_path=transcript_path, warning=" ".join(warnings) or None,
+    )

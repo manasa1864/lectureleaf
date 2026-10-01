@@ -53,7 +53,8 @@ create table if not exists public.user_settings (
     "sensitivity": 50, "min_time_between": 30, "dupe_sensitivity": 70,
     "remove_dupes": true, "skip_transitions": true, "skip_low_quality": true,
     "page_density": "balanced", "max_pages": null,
-    "pdf_style": "lecture", "pdf_page_size": "A4", "include_timestamps": true
+    "pdf_style": "lecture", "pdf_page_size": "A4", "include_timestamps": true,
+    "generate_key_points": true, "include_topic_headings": true, "detect_topics": true
   }'::jsonb,
   updated_at timestamptz not null default now()
 );
@@ -84,6 +85,9 @@ create table if not exists public.jobs (
   step        integer not null default 0,              -- index of the step on the Processing screen
   error       text,
   pdf_path    text,                                    -- storage path of the generated PDF
+  summary     text,                                    -- AI summary of the lecture
+  warning     text,                                    -- non-fatal problems (e.g. no transcript)
+  transcript_path text,                                -- storage path of transcript.json
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   constraint jobs_status_check check (status in ('queued', 'processing', 'done', 'error')),
@@ -93,6 +97,9 @@ create table if not exists public.jobs (
 -- Frames used to live in a JSON column; they now have their own table.
 alter table public.jobs drop column if exists frames;
 alter table public.jobs add column if not exists updated_at timestamptz not null default now();
+alter table public.jobs add column if not exists summary text;
+alter table public.jobs add column if not exists warning text;
+alter table public.jobs add column if not exists transcript_path text;
 
 create index if not exists jobs_user_created_idx on public.jobs (user_id, created_at desc);
 
@@ -111,9 +118,14 @@ create table if not exists public.job_frames (
   storage_path text not null,                          -- JPEG in the storage bucket
   included     boolean not null default true,          -- Results / Edit: keep or drop
   note         text,                                   -- Edit screen: user's own note
+  heading      text,                                   -- AI topic heading for this moment
+  key_points   jsonb not null default '[]'::jsonb,     -- AI key points from the transcript
   created_at   timestamptz not null default now(),
   unique (job_id, position)
 );
+
+alter table public.job_frames add column if not exists heading text;
+alter table public.job_frames add column if not exists key_points jsonb not null default '[]'::jsonb;
 
 create index if not exists job_frames_job_idx on public.job_frames (job_id, position);
 

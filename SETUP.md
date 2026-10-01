@@ -22,4 +22,14 @@ copy .env.example .env      # fill SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 uvicorn app.main:app --reload --port 8000
 ```
 
+### Transcription and notes (optional but recommended)
+Get a free key at https://console.groq.com/keys and set `GROQ_API_KEY` in `backend/.env`. With it, each PDF gets a summary, a contents page, topic headings and key points per page. Without it you still get frames and timestamps, and the Results page shows a notice. This also needs `ffmpeg` on the PATH (`ffmpeg -version` to check).
+
+### If YouTube blocks downloads
+This is common on cloud servers. Export cookies from a logged-in browser to a `cookies.txt` file and set `YTDLP_COOKIES_FILE`, and/or set `YTDLP_PROXY`. Keep `yt-dlp` current: `pip install -U yt-dlp`.
+
+### Limits (all in `backend/.env`)
+`MAX_LECTURE_MINUTES` (180), `MAX_JOB_MINUTES` (45), `MAX_CONCURRENT_JOBS` (2), `MAX_ACTIVE_JOBS_PER_USER` (2).
+Check `http://localhost:8000/api/health` to see whether Supabase, ffmpeg and Groq are configured.
+
 The `service_role` key goes only in `backend/.env`. Never put it in the frontend `.env`.
