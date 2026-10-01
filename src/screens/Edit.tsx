@@ -1,48 +1,74 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { FramePatch, Job } from '../lib/api';
 
 interface EditProps {
+  job: Job;
+  onUpdateFrame: (index: number, patch: FramePatch) => Promise<void>;
   onBack: () => void;
   onSave: () => void;
 }
 
-const frames = [
-  { time: '03:12', topic: 'Introduction', desc: 'Course overview and objectives', img: 'photo-1434030216411-0b793f4b4173', included: true },
-  { time: '08:45', topic: 'Network Models', desc: 'Why layered architectures exist', img: 'photo-1488190211105-8b0e65b80b4e', included: true },
-  { time: '12:43', topic: 'OSI Model', desc: '7 layers with roles explained', img: 'photo-1516321318423-f06f85e504b3', included: true },
-  { time: '18:21', topic: 'TCP vs UDP', desc: 'Reliable vs connectionless transport', img: 'photo-1522202176988-66273c2fd55f', included: true },
-  { time: '24:09', topic: 'IP Addressing', desc: 'IPv4, subnets, and CIDR notation', img: 'photo-1451187580459-43490279c0fa', included: false },
-  { time: '27:09', topic: 'Three-Way Handshake', desc: 'SYN → SYN-ACK → ACK sequence', img: 'photo-1558494949-ef010cbdcc31', included: true },
-  { time: '33:55', topic: 'Routing Protocols', desc: 'RIP, OSPF, BGP overview', img: 'photo-1544197150-b99a580bb7a8', included: true },
-  { time: '41:18', topic: 'DNS Resolution', desc: 'How domain names resolve to IPs', img: 'photo-1573164713714-d95e436ab8d6', included: true },
-];
+const fieldStyle = { background: '#F5F1E8', border: '1px solid #E2DDD3', color: '#151515', fontFamily: 'Inter' };
 
-const allTopics = ['Introduction', 'Network Models', 'OSI Model', 'TCP vs UDP', 'IP Addressing', 'Transport Layer', 'Application Layer', 'Summary'];
+const parsePoints = (text: string) =>
+  text
+    .split('\n')
+    .map((l) => l.trim().slice(0, 400))
+    .filter(Boolean)
+    .slice(0, 8);
 
-export default function Edit({ onBack, onSave }: EditProps) {
-  const [frames_, setFrames] = useState(frames);
-  const [selected, setSelected] = useState(2);
-  const [editingDesc, setEditingDesc] = useState(false);
+export default function Edit({ job, onUpdateFrame, onBack, onSave }: EditProps) {
+  const frames = job.frames;
+  const [selected, setSelected] = useState(0);
+  const [heading, setHeading] = useState('');
+  const [points, setPoints] = useState('');
+  const [note, setNote] = useState('');
+  const [error, setError] = useState('');
 
-  const frame = frames_[selected];
+  const frame = frames[selected];
 
-  const toggleIncluded = (i: number) => {
-    setFrames((prev) => prev.map((f, idx) => idx === i ? { ...f, included: !f.included } : f));
+  // Load the selected frame's text into the editor whenever the selection changes.
+  useEffect(() => {
+    const f = frames[selected];
+    setHeading(f?.heading ?? '');
+    setPoints((f?.key_points ?? []).join('\n'));
+    setNote(f?.note ?? '');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected]);
+
+  const run = async (index: number, patch: FramePatch) => {
+    setError('');
+    try {
+      await onUpdateFrame(index, patch);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save that change');
+    }
   };
 
-  const updateDesc = (desc: string) => {
-    setFrames((prev) => prev.map((f, idx) => idx === selected ? { ...f, desc } : f));
+  /** Save whatever was edited in the text fields (only the parts that changed). */
+  const commitText = async () => {
+    if (!frame) return;
+    const patch: FramePatch = {};
+    const newPoints = parsePoints(points);
+    if (heading.trim() !== (frame.heading ?? '')) patch.heading = heading.trim();
+    if (JSON.stringify(newPoints) !== JSON.stringify(frame.key_points ?? [])) patch.key_points = newPoints;
+    if (note.trim() !== (frame.note ?? '')) patch.note = note.trim();
+    if (Object.keys(patch).length) await run(frame.index, patch);
   };
 
-  const updateTopic = (topic: string) => {
-    setFrames((prev) => prev.map((f, idx) => idx === selected ? { ...f, topic } : f));
-  };
+  const includedCount = frames.filter((f) => f.included !== false).length;
+  const isIncluded = frame?.included !== false;
 
-  const removeFrame = (i: number) => {
-    if (frames_.length <= 1) return;
-    const newFrames = frames_.filter((_, idx) => idx !== i);
-    setFrames(newFrames);
-    setSelected(Math.min(selected, newFrames.length - 1));
-  };
+  if (!frame) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ background: '#F5F1E8' }}>
+        <p style={{ color: '#68645F', fontFamily: 'Inter' }}>There are no frames to edit.</p>
+        <button onClick={onBack} className="px-5 py-2 rounded-full text-sm font-semibold" style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}>
+          Back to results
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: '#F5F1E8', minHeight: '100vh' }}>
@@ -51,11 +77,7 @@ export default function Edit({ onBack, onSave }: EditProps) {
         className="sticky top-0 z-40 flex items-center justify-between px-6 h-14"
         style={{ background: 'rgba(245,241,232,0.94)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #E2DDD3' }}
       >
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm"
-          style={{ color: '#68645F', fontFamily: 'Inter' }}
-        >
+        <button onClick={async () => { await commitText(); onBack(); }} className="flex items-center gap-2 text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>
           <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
             <path d="M9 2.5L4.5 7L9 11.5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -64,13 +86,7 @@ export default function Edit({ onBack, onSave }: EditProps) {
         <h1 className="text-sm font-bold" style={{ color: '#7A263A', fontFamily: 'DM Sans' }}>Review your study pages</h1>
         <div className="flex items-center gap-2">
           <button
-            className="text-sm font-medium px-4 py-1.5 rounded-full"
-            style={{ background: '#FFFDF9', color: '#151515', border: '1px solid #E2DDD3', fontFamily: 'DM Sans' }}
-          >
-            Download PDF
-          </button>
-          <button
-            onClick={onSave}
+            onClick={async () => { await commitText(); onSave(); }}
             className="text-sm font-medium px-4 py-1.5 rounded-full"
             style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = '#641E30')}
@@ -83,153 +99,132 @@ export default function Edit({ onBack, onSave }: EditProps) {
 
       <div className="flex h-[calc(100vh-56px)]">
         {/* Sidebar — frame list */}
-        <div
-          className="w-52 flex-shrink-0 overflow-y-auto p-3 space-y-2"
-          style={{ background: '#FFFDF9', borderRight: '1px solid #E2DDD3' }}
-        >
+        <div className="w-52 flex-shrink-0 overflow-y-auto p-3 space-y-2" style={{ background: '#FFFDF9', borderRight: '1px solid #E2DDD3' }}>
           <p className="text-xs font-bold uppercase tracking-wide px-1 mb-3" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>
-            {frames_.filter((f) => f.included).length} frames included
+            {includedCount} of {frames.length} frames included
           </p>
-          {frames_.map((f, i) => (
-            <button
-              key={i}
-              onClick={() => setSelected(i)}
-              className="w-full text-left rounded-xl overflow-hidden transition-all"
-              style={{
-                border: `1.5px solid ${selected === i ? '#7A263A' : 'transparent'}`,
-                opacity: f.included ? 1 : 0.5,
-              }}
-            >
-              <div className="relative">
-                <img
-                  src={`https://images.unsplash.com/${f.img}?w=200&h=120&fit=crop&auto=format`}
-                  alt={f.topic}
-                  className="w-full h-14 object-cover"
-                />
-                <span className="absolute bottom-1 left-1.5 text-[9px] font-semibold px-1 rounded" style={{ background: 'rgba(122,38,58,0.8)', color: '#C5A46D', fontFamily: 'Inter' }}>
-                  {f.time}
-                </span>
-                {!f.included && (
-                  <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(245,241,232,0.5)' }}>
-                    <span className="text-[9px] font-bold" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Excluded</span>
-                  </div>
-                )}
-              </div>
-              <div className="px-2 py-1.5" style={{ background: selected === i ? '#F7EEEA' : '#F5F1E8' }}>
-                <p className="text-[11px] font-semibold truncate" style={{ color: selected === i ? '#7A263A' : '#151515', fontFamily: 'DM Sans' }}>{f.topic}</p>
-              </div>
-            </button>
-          ))}
+          {frames.map((f, i) => {
+            const on = f.included !== false;
+            return (
+              <button
+                key={f.index}
+                onClick={async () => { await commitText(); setSelected(i); }}
+                className="w-full text-left rounded-xl overflow-hidden transition-all"
+                style={{ border: `1.5px solid ${selected === i ? '#7A263A' : 'transparent'}`, opacity: on ? 1 : 0.5 }}
+              >
+                <div className="relative">
+                  <img src={f.url} alt={f.heading || `Moment ${f.index}`} className="w-full h-14 object-cover" />
+                  <span className="absolute bottom-1 left-1.5 text-[9px] font-semibold px-1 rounded" style={{ background: 'rgba(122,38,58,0.8)', color: '#C5A46D', fontFamily: 'Inter' }}>
+                    {f.time}
+                  </span>
+                  {!on && (
+                    <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(245,241,232,0.5)' }}>
+                      <span className="text-[9px] font-bold" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Excluded</span>
+                    </div>
+                  )}
+                </div>
+                <div className="px-2 py-1.5" style={{ background: selected === i ? '#F7EEEA' : '#F5F1E8' }}>
+                  <p className="text-[11px] font-semibold truncate" style={{ color: selected === i ? '#7A263A' : '#151515', fontFamily: 'DM Sans' }}>
+                    {f.heading || `Moment ${f.index}`}
+                  </p>
+                </div>
+              </button>
+            );
+          })}
         </div>
 
         {/* Main preview */}
         <div className="flex-1 flex items-center justify-center p-8 overflow-auto">
-          <div className="w-full max-w-md">
-            <div className="rounded-2xl overflow-hidden shadow-xl" style={{ border: '1.5px solid #E2DDD3', background: '#F5F1E8' }}>
-              <img
-                src={`https://images.unsplash.com/${frame.img}?w=800&h=450&fit=crop&auto=format`}
-                alt={frame.topic}
-                className="w-full object-cover"
-                style={{ height: 260 }}
-              />
+          <div className="w-full max-w-xl">
+            <div className="rounded-2xl overflow-hidden shadow-xl" style={{ border: '1.5px solid #E2DDD3', background: '#F5F1E8', opacity: isIncluded ? 1 : 0.6 }}>
+              <img src={frame.url} alt={frame.heading || `Moment ${frame.index}`} className="w-full object-contain" style={{ maxHeight: 340, background: '#EDE9E0' }} />
               <div className="p-6">
-                <div className="flex items-center gap-2 mb-1">
+                <div className="flex items-center gap-2 mb-2">
                   <span className="text-sm font-bold" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>{frame.time}</span>
                   <div className="w-1 h-1 rounded-full" style={{ background: '#E2DDD3' }} />
-                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#EFE3CC', color: '#7A263A', fontFamily: 'DM Sans', fontWeight: 600 }}>{frame.topic}</span>
+                  <span className="text-xs px-2 py-0.5 rounded-full" style={{ background: '#EFE3CC', color: '#7A263A', fontFamily: 'DM Sans', fontWeight: 600 }}>
+                    {heading.trim() || `Moment ${frame.index}`}
+                  </span>
                 </div>
-                <p className="text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>{frame.desc}</p>
+                <ul className="space-y-1.5">
+                  {parsePoints(points).map((p, k) => (
+                    <li key={k} className="text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>• {p}</li>
+                  ))}
+                </ul>
               </div>
             </div>
+            {error && <p role="alert" className="mt-4 text-sm text-center" style={{ color: '#C05050', fontFamily: 'Inter' }}>{error}</p>}
           </div>
         </div>
 
         {/* Right panel — details */}
-        <div
-          className="w-64 flex-shrink-0 overflow-y-auto p-5"
-          style={{ background: '#FFFDF9', borderLeft: '1px solid #E2DDD3' }}
-        >
+        <div className="w-72 flex-shrink-0 overflow-y-auto p-5" style={{ background: '#FFFDF9', borderLeft: '1px solid #E2DDD3' }}>
           <h3 className="text-sm font-bold mb-5" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Frame details</h3>
 
-          {/* Timestamp */}
           <div className="mb-4">
             <p className="text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Timestamp</p>
-            <div className="px-3 py-2 rounded-xl text-sm" style={{ background: '#F5F1E8', border: '1px solid #E2DDD3', color: '#C5A46D', fontFamily: 'Inter', fontWeight: 500 }}>
-              {frame.time}
-            </div>
+            <div className="px-3 py-2 rounded-xl text-sm" style={{ ...fieldStyle, color: '#C5A46D', fontWeight: 500 }}>{frame.time}</div>
           </div>
 
-          {/* Topic */}
           <div className="mb-4">
-            <p className="text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Topic</p>
-            <select
-              value={frame.topic}
-              onChange={(e) => updateTopic(e.target.value)}
+            <label htmlFor="heading" className="block text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Heading</label>
+            <input
+              id="heading"
+              value={heading}
+              maxLength={120}
+              onChange={(e) => setHeading(e.target.value)}
+              onBlur={commitText}
+              placeholder={`Moment ${frame.index}`}
               className="w-full px-3 py-2 rounded-xl text-sm outline-none"
-              style={{ background: '#F5F1E8', border: '1px solid #E2DDD3', color: '#151515', fontFamily: 'Inter' }}
-            >
-              {allTopics.map((t) => <option key={t}>{t}</option>)}
-            </select>
+              style={fieldStyle}
+            />
           </div>
 
-          {/* Description */}
+          <div className="mb-4">
+            <label htmlFor="points" className="block text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>
+              Key points <span style={{ fontWeight: 400 }}>(one per line)</span>
+            </label>
+            <textarea
+              id="points"
+              value={points}
+              onChange={(e) => setPoints(e.target.value)}
+              onBlur={commitText}
+              rows={6}
+              className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+              style={fieldStyle}
+            />
+          </div>
+
           <div className="mb-5">
-            <p className="text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Description</p>
-            {editingDesc ? (
-              <textarea
-                value={frame.desc}
-                onChange={(e) => updateDesc(e.target.value)}
-                onBlur={() => setEditingDesc(false)}
-                autoFocus
-                rows={3}
-                className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
-                style={{ background: '#F5F1E8', border: '1.5px solid #C5A46D', color: '#151515', fontFamily: 'Inter' }}
-              />
-            ) : (
-              <div
-                onClick={() => setEditingDesc(true)}
-                className="px-3 py-2 rounded-xl text-sm cursor-text transition-all"
-                style={{ background: '#F5F1E8', border: '1px solid #E2DDD3', color: '#151515', fontFamily: 'Inter', minHeight: 60 }}
-                onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#C5A46D')}
-                onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2DDD3')}
-              >
-                {frame.desc}
-              </div>
-            )}
+            <label htmlFor="note" className="block text-xs font-semibold mb-1.5" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>My note</label>
+            <textarea
+              id="note"
+              value={note}
+              maxLength={2000}
+              onChange={(e) => setNote(e.target.value)}
+              onBlur={commitText}
+              rows={3}
+              placeholder="Appears under the key points in the PDF"
+              className="w-full px-3 py-2 rounded-xl text-sm outline-none resize-none"
+              style={fieldStyle}
+            />
           </div>
 
-          {/* Include toggle */}
-          <div className="flex items-center justify-between mb-5">
+          <div className="flex items-center justify-between mb-2">
             <p className="text-xs font-semibold" style={{ color: '#68645F', fontFamily: 'DM Sans' }}>Include in PDF</p>
             <button
-              onClick={() => toggleIncluded(selected)}
+              onClick={() => run(frame.index, { included: !isIncluded })}
+              role="switch"
+              aria-checked={isIncluded}
               className="w-10 h-6 rounded-full transition-all relative"
-              style={{ background: frame.included ? '#7A263A' : '#E2DDD3' }}
+              style={{ background: isIncluded ? '#7A263A' : '#E2DDD3' }}
             >
-              <div
-                className="absolute top-0.5 w-5 h-5 rounded-full transition-all"
-                style={{ background: '#F5F1E8', left: frame.included ? '50%' : '2px' }}
-              />
+              <div className="absolute top-0.5 w-5 h-5 rounded-full transition-all" style={{ background: '#F5F1E8', left: isIncluded ? '50%' : '2px' }} />
             </button>
           </div>
-
-          <div className="space-y-2">
-            <button
-              className="w-full px-3 py-2 rounded-xl text-sm font-medium text-left transition-all"
-              style={{ background: '#F5F1E8', border: '1px solid #E2DDD3', color: '#68645F', fontFamily: 'DM Sans' }}
-              onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#C5A46D')}
-              onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2DDD3')}
-            >
-              ↑↓ Reorder frame
-            </button>
-            <button
-              onClick={() => removeFrame(selected)}
-              className="w-full px-3 py-2 rounded-xl text-sm font-medium text-left transition-all"
-              style={{ background: '#FEF5F5', border: '1px solid #F5D5D5', color: '#C05050', fontFamily: 'DM Sans' }}
-            >
-              × Remove frame
-            </button>
-          </div>
+          {includedCount === 0 && (
+            <p className="text-xs" style={{ color: '#C05050', fontFamily: 'Inter' }}>Keep at least one frame to build a PDF.</p>
+          )}
         </div>
       </div>
     </div>

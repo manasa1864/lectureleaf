@@ -29,6 +29,13 @@ export interface Job {
   has_pdf: boolean;
 }
 
+export interface FramePatch {
+  included?: boolean;
+  note?: string;
+  heading?: string;
+  key_points?: string[];
+}
+
 export interface JobSettings {
   sensitivity: number;
   min_time_between: number;
@@ -74,14 +81,28 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+async function fetchBlob(path: string): Promise<Blob> {
+  const { data } = await supabase.auth.getSession();
+  let res: Response;
+  try {
+    res = await fetch(`${API_URL}${path}`, { headers: data.session ? { Authorization: `Bearer ${data.session.access_token}` } : {} });
+  } catch {
+    throw new Error('Cannot reach the LectureLeaf server. Is the backend running?');
+  }
+  if (res.status === 401) await supabase.auth.signOut();
+  if (!res.ok) throw new Error(res.status === 409 ? 'The PDF is not ready yet.' : `Could not load the PDF (${res.status})`);
+  return res.blob();
+}
+
 export const api = {
   signUp: (email: string, password: string) =>
     request<{ ok: boolean }>('/api/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   createJob: (url: string, settings: JobSettings) =>
     request<{ id: string }>('/api/jobs', { method: 'POST', body: JSON.stringify({ url, settings }) }),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),
-  updateFrame: (id: string, index: number, patch: { included?: boolean; note?: string }) =>
+  updateFrame: (id: string, index: number, patch: FramePatch) =>
     request<{ ok: boolean }>(`/api/jobs/${id}/frames/${index}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   rebuildPdf: (id: string) => request<{ url: string }>(`/api/jobs/${id}/rebuild`, { method: 'POST' }),
+  getPdfBlob: (id: string) => fetchBlob(`/api/jobs/${id}/pdf/file`),
   getPdfUrl: (id: string) => request<{ url: string }>(`/api/jobs/${id}/pdf`),
 };

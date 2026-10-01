@@ -3,6 +3,7 @@ import glob
 import os
 import shutil
 import subprocess
+import time
 from urllib.parse import urlparse
 
 import yt_dlp
@@ -65,13 +66,22 @@ def fetch_info(url: str) -> dict:
     return info
 
 
+TRANSIENT = ("403", "forbidden", "timed out", "timeout", "connection", "temporary failure", "502", "503")
+
+
 def _download(url: str, tmp: str, name: str, fmt: str) -> str:
     os.makedirs(tmp, exist_ok=True)
-    try:
-        with yt_dlp.YoutubeDL(_opts(tmp, name, fmt)) as ydl:
-            ydl.download([url])
-    except Exception as exc:
-        raise friendly_download_error(exc)
+    for attempt in range(3):
+        try:
+            with yt_dlp.YoutubeDL(_opts(tmp, name, fmt)) as ydl:
+                ydl.download([url])
+            break
+        except Exception as exc:
+            # YouTube sometimes refuses a request once and accepts the next: retry those with a pause.
+            if attempt < 2 and any(t in str(exc).lower() for t in TRANSIENT):
+                time.sleep(3 * (attempt + 1))
+                continue
+            raise friendly_download_error(exc)
     files = glob.glob(os.path.join(tmp, f"{name}.*"))
     files = [f for f in files if not f.endswith((".part", ".ytdl"))]
     if not files:
@@ -82,7 +92,8 @@ def _download(url: str, tmp: str, name: str, fmt: str) -> str:
 def download_video(url: str, tmp: str) -> str:
     # Frames only need the picture. YouTube serves video and audio separately, so ask for a
     # video-only H.264 stream (OpenCV decodes it reliably) and fall back to anything usable.
-    return _download(url, tmp, "video", "bv*[height<=480][vcodec^=avc1]/bv*[height<=480][ext=mp4]/bv*[height<=480]/b[height<=480]/b")
+    h = config.VIDEO_MAX_HEIGHT
+    return _download(url, tmp, "video", f"bv*[height<={h}][vcodec^=avc1]/bv*[height<={h}][ext=mp4]/bv*[height<={h}]/b[height<={h}]/b")
 
 
 def download_audio(url: str, tmp: str) -> str:

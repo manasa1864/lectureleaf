@@ -120,11 +120,13 @@ create table if not exists public.job_frames (
   note         text,                                   -- Edit screen: user's own note
   heading      text,                                   -- AI topic heading for this moment
   key_points   jsonb not null default '[]'::jsonb,     -- AI key points from the transcript
+  ocr_text     text,                                   -- text read off the frame itself
   created_at   timestamptz not null default now(),
   unique (job_id, position)
 );
 
 alter table public.job_frames add column if not exists heading text;
+alter table public.job_frames add column if not exists ocr_text text;
 alter table public.job_frames add column if not exists key_points jsonb not null default '[]'::jsonb;
 
 create index if not exists job_frames_job_idx on public.job_frames (job_id, position);

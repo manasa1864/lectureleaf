@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from . import config
 from .auth import current_user_id
@@ -164,6 +164,16 @@ def get_pdf(job_id: str, user_id: str = Depends(current_user_id)):
     if not job.get("pdf_path"):
         raise HTTPException(409, "The PDF isn't ready yet.")
     return {"url": signed_url(job["pdf_path"])}
+
+
+@app.get("/api/jobs/{job_id}/pdf/file")
+def get_pdf_file(job_id: str, user_id: str = Depends(current_user_id)):
+    """The PDF itself, streamed through the API (so the page can preview it without cross-site embedding)."""
+    job = _owned(job_id, user_id)
+    if not job.get("pdf_path"):
+        raise HTTPException(409, "The PDF isn't ready yet.")
+    data = get_client().storage.from_(config.STORAGE_BUCKET).download(job["pdf_path"])
+    return Response(data, media_type="application/pdf", headers={"Cache-Control": "no-store"})
 
 
 @app.patch("/api/jobs/{job_id}/frames/{index}")

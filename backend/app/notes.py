@@ -77,7 +77,7 @@ def _clean_list(value, limit: int) -> list[str]:
 
 
 def build_notes(
-    title: str, times: list[int], segments: list[Segment], density: str
+    title: str, times: list[int], segments: list[Segment], density: str, slide_texts: list[str] | None = None
 ) -> tuple[list[Section], str, str]:
     """Returns (one Section per frame, lecture summary, warning). Never raises: degrades with a warning."""
     sections = [Section() for _ in times]
@@ -97,9 +97,13 @@ def build_notes(
         user = json.dumps({
             "lecture_title": title,
             "instructions": f'For each section give a "heading" (max 8 words) and up to {n_points} "key_points" '
-                            f"(each max 22 words, factual, taken from the transcript). "
+                            "(each max 22 words, factual, taken from the transcript; text_on_screen is what the "
+                            "slide shows and can help with names, terms and spelling). "
                             'Return {"sections":[{"id":<id>,"heading":"...","key_points":["..."]}]}.',
-            "sections": [{"id": i, "transcript": t} for i, t in batch],
+            "sections": [
+                {"id": i, "transcript": t, "text_on_screen": (slide_texts[i][:700] if slide_texts else "")}
+                for i, t in batch
+            ],
         })
         try:
             out = _chat_json(system, user)

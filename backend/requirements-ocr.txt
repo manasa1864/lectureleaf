@@ -1,0 +1,4 @@
+# RapidOCR (reads text off frames). Install AFTER requirements.txt, with --no-deps, because its own
+# dependency list pulls in the GUI build of OpenCV, which clashes with opencv-python-headless:
+#   pip install --no-deps -r requirements-ocr.txt
+rapidocr>=3.0

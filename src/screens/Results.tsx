@@ -1,97 +1,49 @@
 import { useState } from 'react';
 import Logo from '../components/Logo';
-import { api, type Job } from '../lib/api';
+import type { FramePatch, Job } from '../lib/api';
+import { pdfFilename, saveBlob } from '../lib/download';
 
 interface ResultsProps {
-  job: Job | null;
+  job: Job;
+  onUpdateFrame: (index: number, patch: FramePatch) => Promise<void>;
+  onGetPdf: () => Promise<Blob>;
   onPreview: () => void;
   onEdit: () => void;
   onBack: () => void;
 }
 
-const demoFrames = [
-  { time: '03:12', topic: 'Introduction', desc: 'Course overview and objectives', img: 'photo-1434030216411-0b793f4b4173', keep: true },
-  { time: '08:45', topic: 'Network Models', desc: 'Why layered architectures exist', img: 'photo-1488190211105-8b0e65b80b4e', keep: true },
-  { time: '12:43', topic: 'OSI Model', desc: '7 layers with roles explained', img: 'photo-1516321318423-f06f85e504b3', keep: true },
-  { time: '18:21', topic: 'TCP vs UDP', desc: 'Reliable vs connectionless transport', img: 'photo-1522202176988-66273c2fd55f', keep: true },
-  { time: '24:09', topic: 'IP Addressing', desc: 'IPv4, subnets, and CIDR notation', img: 'photo-1451187580459-43490279c0fa', keep: true },
-  { time: '27:09', topic: 'Three-Way Handshake', desc: 'SYN → SYN-ACK → ACK sequence', img: 'photo-1558494949-ef010cbdcc31', keep: true },
-  { time: '33:55', topic: 'Routing Protocols', desc: 'RIP, OSPF, BGP overview', img: 'photo-1544197150-b99a580bb7a8', keep: true },
-  { time: '41:18', topic: 'DNS Resolution', desc: 'How domain names resolve to IPs', img: 'photo-1573164713714-d95e436ab8d6', keep: true },
-  { time: '47:32', topic: 'HTTP/HTTPS', desc: 'Request-response model, TLS', img: 'photo-1432888498266-38ffec3eaf0a', keep: true },
-  { time: '54:01', topic: 'Firewalls', desc: 'Packet filtering, stateful inspection', img: 'photo-1563986768609-322da13575f3', keep: true },
-  { time: '01:02:44', topic: 'VPN Tunneling', desc: 'Encryption and tunneling protocols', img: 'photo-1516321318423-f06f85e504b3', keep: true },
-  { time: '01:14:08', topic: 'Summary', desc: 'Review of all key concepts covered', img: 'photo-1434030216411-0b793f4b4173', keep: true },
-];
+export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdit, onBack }: ResultsProps) {
+  const [activeTab, setActiveTab] = useState<'frames' | 'topics'>('frames');
+  const [downloading, setDownloading] = useState(false);
+  const [error, setError] = useState('');
 
-const topics = [
-  { num: '01', name: 'Introduction', count: 2, range: '0:00 – 8:44', img: 'photo-1434030216411-0b793f4b4173' },
-  { num: '02', name: 'Network Models', count: 3, range: '8:45 – 18:20', img: 'photo-1488190211105-8b0e65b80b4e' },
-  { num: '03', name: 'OSI Model', count: 5, range: '18:21 – 33:54', img: 'photo-1516321318423-f06f85e504b3' },
-  { num: '04', name: 'TCP/IP', count: 8, range: '33:55 – 47:31', img: 'photo-1558494949-ef010cbdcc31' },
-  { num: '05', name: 'Transport Layer', count: 6, range: '47:32 – 54:00', img: 'photo-1522202176988-66273c2fd55f' },
-  { num: '06', name: 'Application Layer', count: 4, range: '54:01 – 1:02:43', img: 'photo-1432888498266-38ffec3eaf0a' },
-  { num: '07', name: 'Security Basics', count: 5, range: '1:02:44 – 1:14:07', img: 'photo-1563986768609-322da13575f3' },
-  { num: '08', name: 'Summary', count: 2, range: '1:14:08 – 1:24:07', img: 'photo-1544197150-b99a580bb7a8' },
-];
+  const frames = job.frames;
+  const keptCount = frames.filter((f) => f.included !== false).length;
+  const hasTopics = frames.some((f) => f.heading);
 
-export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps) {
-  const frames = job
-    ? job.frames.map((f) => ({
-        index: f.index,
-        time: f.time,
-        topic: f.heading || `Moment ${f.index}`,
-        points: f.key_points?.length ? f.key_points : [`Captured at ${f.time}`],
-        src: f.url ?? '',
-      }))
-    : demoFrames.map((f, i) => ({ index: i + 1, time: f.time, topic: f.topic, points: [f.desc], src: `https://images.unsplash.com/${f.img}?w=400&h=240&fit=crop&auto=format` }));
-  const hasTopics = !job || job.frames.some((f) => f.heading);
-  const liveTopics = frames.map((f, i) => ({
-    num: String(i + 1).padStart(2, '0'),
-    name: f.topic,
-    range: `${f.time} – ${frames[i + 1]?.time ?? 'end'}`,
-    count: 1,
-    src: f.src,
-  }));
-  const topicRows = job ? liveTopics : topics.map((t) => ({ ...t, src: `https://images.unsplash.com/${t.img}?w=112&h=80&fit=crop&auto=format` }));
-  const [pdfError, setPdfError] = useState('');
+  const toggleKeep = (index: number, included: boolean) => {
+    setError('');
+    onUpdateFrame(index, { included }).catch((err) =>
+      setError(err instanceof Error ? err.message : 'Could not save that change'),
+    );
+  };
 
   const downloadPdf = async () => {
-    setPdfError('');
+    setError('');
     setDownloading(true);
     try {
-      // Frames were removed since the PDF was built, so rebuild it first.
-      const { url } = dirty ? await api.rebuildPdf(job!.id) : await api.getPdfUrl(job!.id);
-      setDirty(false);
-      window.open(url, '_blank');
+      saveBlob(await onGetPdf(), pdfFilename(job.title));
     } catch (err) {
-      setPdfError(err instanceof Error ? err.message : 'Could not get the PDF');
+      setError(err instanceof Error ? err.message : 'Could not get the PDF');
     } finally {
       setDownloading(false);
     }
   };
 
-  const [kept, setKept] = useState(() =>
-    job ? job.frames.flatMap((f, i) => (f.included === false ? [] : [i])) : frames.map((_, i) => i),
-  );
-  const [dirty, setDirty] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'frames' | 'topics'>('frames');
-
-  const toggleKeep = (i: number) => {
-    const nowKept = !kept.includes(i);
-    setKept((prev) => (nowKept ? [...prev, i] : prev.filter((x) => x !== i)));
-    if (!job) return;
-    setPdfError('');
-    api
-      .updateFrame(job.id, frames[i].index, { included: nowKept })
-      .then(() => setDirty(true))
-      .catch((err) => {
-        // Put the toggle back if it couldn't be saved.
-        setKept((prev) => (nowKept ? prev.filter((x) => x !== i) : [...prev, i]));
-        setPdfError(err instanceof Error ? err.message : 'Could not save that change');
-      });
-  };
+  const stats = [
+    { value: `${keptCount}`, label: 'Important frames' },
+    ...(job.duration_s ? [{ value: `${Math.max(1, Math.round(job.duration_s / 60))}m`, label: 'Lecture duration' }] : []),
+  ];
 
   return (
     <div style={{ background: '#F5F1E8', minHeight: '100vh' }}>
@@ -100,11 +52,7 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
         className="sticky top-0 z-40 flex items-center justify-between px-6 md:px-10 h-16"
         style={{ background: 'rgba(245,241,232,0.94)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #E2DDD3' }}
       >
-        <button
-          onClick={onBack}
-          className="flex items-center gap-2 text-sm"
-          style={{ color: '#68645F', fontFamily: 'Inter' }}
-        >
+        <button onClick={onBack} className="flex items-center gap-2 text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path d="M10 3L5 8L10 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
@@ -123,14 +71,15 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
           </button>
           <button
             onClick={onPreview}
-            className="text-sm font-medium px-4 py-2 rounded-full transition-all"
+            disabled={keptCount === 0}
+            className="text-sm font-medium px-4 py-2 rounded-full transition-all disabled:opacity-50"
             style={{ background: '#FFFDF9', color: '#7A263A', border: '1.5px solid #C5A46D', fontFamily: 'DM Sans' }}
           >
             Preview
           </button>
           <button
             onClick={downloadPdf}
-            disabled={!job?.has_pdf || downloading || kept.length === 0}
+            disabled={!job.has_pdf || downloading || keptCount === 0}
             className="text-sm font-medium px-5 py-2 rounded-full transition-all flex items-center gap-2 disabled:opacity-50"
             style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}
             onMouseEnter={(e) => (e.currentTarget.style.background = '#641E30')}
@@ -155,36 +104,28 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
           <h1 className="text-3xl md:text-4xl font-bold mb-2" style={{ color: '#7A263A', fontFamily: 'DM Sans', letterSpacing: '-0.02em' }}>
             Your LectureLeaf is ready.
           </h1>
+          {job.title && <p className="text-sm mb-1" style={{ color: '#151515', fontFamily: 'DM Sans', fontWeight: 600 }}>{job.title}</p>}
           <p style={{ color: '#68645F', fontFamily: 'Inter' }}>
-            We found {kept.length} useful visual moments from this lecture.
+            We found {keptCount} useful visual moments from this lecture.
           </p>
-          {job?.summary && (
+          {job.summary && (
             <p className="mt-4 text-sm leading-relaxed max-w-2xl" style={{ color: '#151515', fontFamily: 'Inter' }}>{job.summary}</p>
           )}
-          {job?.warning && (
+          {job.warning && (
             <p className="mt-4 text-xs p-3 rounded-lg max-w-2xl" style={{ background: '#F7EEEA', border: '1px solid #C5A46D', color: '#7A263A', fontFamily: 'Inter' }}>
               {job.warning}
             </p>
           )}
-          {pdfError && (
-            <p role="alert" className="mt-4 text-sm" style={{ color: '#C05050', fontFamily: 'Inter' }}>{pdfError}</p>
+          {error && (
+            <p role="alert" className="mt-4 text-sm" style={{ color: '#C05050', fontFamily: 'Inter' }}>{error}</p>
           )}
         </div>
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-          {[
-            { value: `${kept.length}`, label: 'Important frames', color: '#7A263A' },
-            { value: '12', label: 'Topics identified', color: '#7A263A' },
-            { value: job?.duration_s ? `${Math.round(job.duration_s / 60)}m` : '1h 24m', label: 'Lecture duration', color: '#7A263A' },
-            { value: '6.8 MB', label: 'Estimated PDF size', color: '#7A263A' },
-          ].filter((_, i) => !job || i === 0 || i === 2).map((stat, i) => (
-            <div
-              key={i}
-              className="p-5 rounded-2xl"
-              style={{ background: '#FFFDF9', border: '1.5px solid #E2DDD3' }}
-            >
-              <p className="text-3xl font-bold mb-1" style={{ color: stat.color, fontFamily: 'DM Sans' }}>{stat.value}</p>
+          {stats.map((stat) => (
+            <div key={stat.label} className="p-5 rounded-2xl" style={{ background: '#FFFDF9', border: '1.5px solid #E2DDD3' }}>
+              <p className="text-3xl font-bold mb-1" style={{ color: '#7A263A', fontFamily: 'DM Sans' }}>{stat.value}</p>
               <p className="text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>{stat.label}</p>
             </div>
           ))}
@@ -192,102 +133,103 @@ export default function Results({ job, onPreview, onEdit, onBack }: ResultsProps
 
         {/* Tab switcher */}
         <div className="flex items-center gap-1 p-1 rounded-xl mb-6 w-fit" style={{ background: '#FFFDF9', border: '1px solid #E2DDD3' }}>
-          {([['frames', 'Captured moments'], ['topics', 'Topic structure']] as const).filter(([id]) => id === 'frames' || hasTopics).map(([id, label]) => (
-            <button
-              key={id}
-              onClick={() => setActiveTab(id)}
-              className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
-              style={{
-                background: activeTab === id ? '#F5F1E8' : 'transparent',
-                color: activeTab === id ? '#7A263A' : '#68645F',
-                fontFamily: 'DM Sans',
-                boxShadow: activeTab === id ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
-                border: activeTab === id ? '1px solid #E2DDD3' : '1px solid transparent',
-              }}
-            >
-              {label}
-            </button>
-          ))}
+          {([['frames', 'Captured moments'], ['topics', 'Topic structure']] as const)
+            .filter(([id]) => id === 'frames' || hasTopics)
+            .map(([id, label]) => (
+              <button
+                key={id}
+                onClick={() => setActiveTab(id)}
+                className="px-4 py-2 rounded-lg text-sm font-medium transition-all"
+                style={{
+                  background: activeTab === id ? '#F5F1E8' : 'transparent',
+                  color: activeTab === id ? '#7A263A' : '#68645F',
+                  fontFamily: 'DM Sans',
+                  boxShadow: activeTab === id ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+                  border: activeTab === id ? '1px solid #E2DDD3' : '1px solid transparent',
+                }}
+              >
+                {label}
+              </button>
+            ))}
         </div>
 
-        {activeTab === 'frames' ? (
+        {activeTab === 'frames' || !hasTopics ? (
           <>
             <h2 className="text-base font-bold mb-4" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Captured moments</h2>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-              {frames.map((frame, i) => (
-                <div
-                  key={i}
-                  className="rounded-2xl overflow-hidden transition-all"
-                  style={{
-                    border: `1.5px solid ${kept.includes(i) ? '#E2DDD3' : '#EDE9E0'}`,
-                    background: kept.includes(i) ? '#F5F1E8' : '#FFFDF9',
-                    opacity: kept.includes(i) ? 1 : 0.5,
-                  }}
-                >
-                  <div className="relative">
-                    <img
-                      src={frame.src}
-                      alt={frame.topic}
-                      className="w-full h-28 object-cover"
-                    />
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: 'rgba(122,38,58,0.85)', color: '#C5A46D', fontFamily: 'Inter' }}>
-                      {frame.time}
+              {frames.map((frame) => {
+                const kept = frame.included !== false;
+                const points = frame.key_points?.length ? frame.key_points : [`Captured at ${frame.time}`];
+                return (
+                  <div
+                    key={frame.index}
+                    className="rounded-2xl overflow-hidden transition-all"
+                    style={{
+                      border: `1.5px solid ${kept ? '#E2DDD3' : '#EDE9E0'}`,
+                      background: kept ? '#F5F1E8' : '#FFFDF9',
+                      opacity: kept ? 1 : 0.5,
+                    }}
+                  >
+                    <div className="relative">
+                      <img src={frame.url} alt={frame.heading || `Moment ${frame.index}`} className="w-full h-28 object-cover" />
+                      <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded-md text-[10px] font-semibold" style={{ background: 'rgba(122,38,58,0.85)', color: '#C5A46D', fontFamily: 'Inter' }}>
+                        {frame.time}
+                      </div>
+                      <button
+                        onClick={() => toggleKeep(frame.index, !kept)}
+                        aria-label={kept ? 'Remove from PDF' : 'Include in PDF'}
+                        className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all"
+                        style={{ background: kept ? '#7A263A' : 'rgba(245,241,232,0.9)' }}
+                      >
+                        {kept ? (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 5L4.5 7.5L8.5 2.5" stroke="#F5F1E8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+                          </svg>
+                        ) : (
+                          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                            <path d="M2 2L8 8M8 2L2 8" stroke="#68645F" strokeWidth="1.3" strokeLinecap="round" />
+                          </svg>
+                        )}
+                      </button>
                     </div>
-                    <button
-                      onClick={() => toggleKeep(i)}
-                      className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center transition-all"
-                      style={{ background: kept.includes(i) ? '#7A263A' : 'rgba(245,241,232,0.9)' }}
-                    >
-                      {kept.includes(i) ? (
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                          <path d="M2 5L4.5 7.5L8.5 2.5" stroke="#F5F1E8" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
-                        </svg>
-                      ) : (
-                        <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                          <path d="M2 2L8 8M8 2L2 8" stroke="#68645F" strokeWidth="1.3" strokeLinecap="round" />
-                        </svg>
-                      )}
-                    </button>
+                    <div className="p-3">
+                      <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>
+                        {frame.heading || `Moment ${frame.index}`}
+                      </span>
+                      <ul className="mt-1 space-y-1">
+                        {points.map((pt, k) => (
+                          <li key={k} className="text-xs leading-snug" style={{ color: '#68645F', fontFamily: 'Inter' }}>{pt}</li>
+                        ))}
+                      </ul>
+                    </div>
                   </div>
-                  <div className="p-3">
-                    <span className="text-[10px] font-bold uppercase tracking-wide" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>{frame.topic}</span>
-                    <ul className="mt-1 space-y-1">
-                      {frame.points.map((pt, k) => (
-                        <li key={k} className="text-xs leading-snug" style={{ color: '#68645F', fontFamily: 'Inter' }}>{pt}</li>
-                      ))}
-                    </ul>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </>
         ) : (
           <>
             <h2 className="text-base font-bold mb-4" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Your lecture, organized.</h2>
             <div className="space-y-3">
-              {topicRows.map((topic, i) => (
+              {frames.map((f, i) => (
                 <div
-                  key={i}
+                  key={f.index}
                   className="flex items-center gap-4 p-4 rounded-2xl transition-all"
-                  style={{ background: '#FFFDF9', border: '1.5px solid #E2DDD3' }}
+                  style={{ background: '#FFFDF9', border: '1.5px solid #E2DDD3', opacity: f.included === false ? 0.5 : 1 }}
                   onMouseEnter={(e) => (e.currentTarget.style.borderColor = '#C5A46D')}
                   onMouseLeave={(e) => (e.currentTarget.style.borderColor = '#E2DDD3')}
                 >
-                  <span className="text-sm font-bold w-8 flex-shrink-0" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>{topic.num}</span>
+                  <span className="text-sm font-bold w-8 flex-shrink-0" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>
+                    {String(i + 1).padStart(2, '0')}
+                  </span>
                   <div className="w-14 h-10 rounded-lg overflow-hidden flex-shrink-0">
-                    <img
-                      src={topic.src}
-                      alt={topic.name}
-                      className="w-full h-full object-cover"
-                    />
+                    <img src={f.url} alt="" className="w-full h-full object-cover" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="font-bold text-sm" style={{ color: '#151515', fontFamily: 'DM Sans' }}>{topic.name}</p>
-                    <p className="text-xs mt-0.5" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>{topic.range}</p>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p className="text-sm font-bold" style={{ color: '#7A263A', fontFamily: 'DM Sans' }}>{topic.count}</p>
-                    <p className="text-xs" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>pages</p>
+                    <p className="font-bold text-sm" style={{ color: '#151515', fontFamily: 'DM Sans' }}>{f.heading || `Moment ${f.index}`}</p>
+                    <p className="text-xs mt-0.5" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>
+                      {f.time} – {frames[i + 1]?.time ?? 'end'}
+                    </p>
                   </div>
                 </div>
               ))}

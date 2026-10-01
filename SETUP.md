@@ -18,9 +18,13 @@ cd backend
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
+pip install --no-deps -r requirements-ocr.txt   # text reading for smarter frame selection
 copy .env.example .env      # fill SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY
 uvicorn app.main:app --reload --port 8000
 ```
+
+### Smarter frame selection (OCR)
+With RapidOCR installed, the backend reads the text on each frame, so it keeps the frame with the most information (for example a slide after all its bullets have appeared) and merges frames showing the same text. It works offline; the models ship with the package. Without it, frames are still chosen, just without text-awareness. Expect roughly 5x real time on a laptop CPU (a 15-minute lecture takes about a minute). `VIDEO_MAX_HEIGHT` (default 720) sets the download quality.
 
 ### Transcription and notes (optional but recommended)
 Get a free key at https://console.groq.com/keys and set `GROQ_API_KEY` in `backend/.env`. With it, each PDF gets a summary, a contents page, topic headings and key points per page. Without it you still get frames and timestamps, and the Results page shows a notice. This also needs `ffmpeg` on the PATH (`ffmpeg -version` to check).

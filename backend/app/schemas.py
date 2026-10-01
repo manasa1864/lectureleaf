@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Annotated, Optional
 
 from pydantic import BaseModel, Field
 
@@ -32,6 +32,8 @@ class JobCreate(BaseModel):
 class FramePatch(BaseModel):
     included: Optional[bool] = None
     note: Optional[str] = Field(None, max_length=2000)
+    heading: Optional[str] = Field(None, max_length=120)
+    key_points: Optional[list[Annotated[str, Field(max_length=400)]]] = Field(None, max_length=8)
 
 
 class SignUp(BaseModel):

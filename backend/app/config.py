@@ -33,3 +33,5 @@ MAX_JOB_MINUTES = _int("MAX_JOB_MINUTES", 45)             # wall-clock budget fo
 MAX_CONCURRENT_JOBS = _int("MAX_CONCURRENT_JOBS", 2)      # jobs processed at once by this server
 MAX_ACTIVE_JOBS_PER_USER = _int("MAX_ACTIVE_JOBS_PER_USER", 2)
 MAX_DOWNLOAD_MB = _int("MAX_DOWNLOAD_MB", 1000)
+VIDEO_MAX_HEIGHT = _int("VIDEO_MAX_HEIGHT", 720)         # higher = sharper slide text, bigger download
+OCR_BUDGET_S = _int("OCR_BUDGET_S", 240)                  # max seconds per job spent reading text off frames

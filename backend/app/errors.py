@@ -16,7 +16,7 @@ def friendly_download_error(exc: Exception) -> UserError:
         (("copyright",), "This video was removed for copyright reasons."),
         (("video unavailable", "is unavailable", "has been removed", "no longer available", "does not exist", "account associated"),
          "This video is unavailable. Check the link and try again."),
-        (("sign in to confirm", "not a bot", "http error 429", "too many requests"),
+        (("sign in to confirm", "not a bot", "http error 429", "too many requests", "http error 403", "forbidden"),
          "YouTube is temporarily blocking downloads from our server. Please try again later."),
         (("unsupported url", "is not a valid url"), "That doesn't look like a valid YouTube video link."),
         (("timed out", "timeout", "temporary failure", "connection", "network"),
