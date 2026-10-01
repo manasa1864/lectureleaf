@@ -1,0 +1,11 @@
+{
+  "title": "LectureLeaf",
+  "description": "Transforms educational YouTube lectures into organized, visual study notes by capturing key slides and diagrams for easy revision and PDF export.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
