@@ -23,3 +23,21 @@ logs/
 !.env.example
 .venv/
 __pycache__/
+
+# Python
+*.pyc
+.pytest_cache/
+
+# Sensitive or large files that must never be committed
+cookies*.txt
+*.cookies
+*.mp4
+*.webm
+*.mkv
+*.m4a
+*.onnx
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/

@@ -36,6 +36,10 @@ class FramePatch(BaseModel):
     key_points: Optional[list[Annotated[str, Field(max_length=400)]]] = Field(None, max_length=8)
 
 
+class JobPatch(BaseModel):
+    title: str = Field(min_length=1, max_length=150)
+
+
 class SignUp(BaseModel):
     email: str = Field(max_length=254, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     password: str = Field(min_length=6, max_length=72)

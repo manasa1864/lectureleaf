@@ -7,15 +7,22 @@ interface ResultsProps {
   job: Job;
   onUpdateFrame: (index: number, patch: FramePatch) => Promise<void>;
   onGetPdf: () => Promise<Blob>;
+  onRename: (title: string) => Promise<void>;
+  onDelete: () => Promise<void>;
+  onLibrary: () => void;
   onPreview: () => void;
   onEdit: () => void;
   onBack: () => void;
 }
 
-export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdit, onBack }: ResultsProps) {
+export default function Results({ job, onUpdateFrame, onGetPdf, onRename, onDelete, onLibrary, onPreview, onEdit, onBack }: ResultsProps) {
   const [activeTab, setActiveTab] = useState<'frames' | 'topics'>('frames');
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const frames = job.frames;
   const keptCount = frames.filter((f) => f.included !== false).length;
@@ -40,6 +47,30 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
     }
   };
 
+  const saveTitle = async () => {
+    const title = titleDraft.trim();
+    setEditingTitle(false);
+    if (!title || title === job.title) return;
+    setError('');
+    try {
+      await onRename(title);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not rename the lecture');
+    }
+  };
+
+  const deleteLecture = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await onDelete();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the lecture');
+      setDeleting(false);
+      setConfirmDelete(false);
+    }
+  };
+
   const stats = [
     { value: `${keptCount}`, label: 'Important frames' },
     ...(job.duration_s ? [{ value: `${Math.max(1, Math.round(job.duration_s / 60))}m`, label: 'Lecture duration' }] : []),
@@ -52,12 +83,23 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
         className="sticky top-0 z-40 flex items-center justify-between px-6 md:px-10 h-16"
         style={{ background: 'rgba(245,241,232,0.94)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #E2DDD3' }}
       >
-        <button onClick={onBack} className="flex items-center gap-2 text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M10 3L5 8L10 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          New lecture
-        </button>
+        <div className="flex items-center gap-5">
+          <button
+            onClick={onLibrary}
+            className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-full transition-all"
+            style={{ background: '#FFFDF9', color: '#7A263A', border: '1.5px solid #C5A46D', fontFamily: 'DM Sans' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#F7EEEA')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFDF9')}
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path d="M10 3L5 8L10 13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+            My Library
+          </button>
+          <button onClick={onBack} className="hidden sm:block text-sm" style={{ color: '#68645F', fontFamily: 'Inter' }}>
+            New lecture
+          </button>
+        </div>
         <Logo size="sm" />
         <div className="flex items-center gap-3">
           <button
@@ -100,11 +142,46 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
           <div className="flex items-center gap-2 mb-2">
             <div className="w-2 h-2 rounded-full" style={{ background: '#C5A46D' }} />
             <span className="text-sm font-semibold" style={{ color: '#C5A46D', fontFamily: 'DM Sans' }}>Processing complete</span>
+            <button
+              onClick={onLibrary}
+              className="text-xs px-2.5 py-1 rounded-full ml-1 transition-all"
+              style={{ background: '#EFE3CC', color: '#7A263A', fontFamily: 'DM Sans', fontWeight: 600 }}
+            >
+              Saved to your library · View library →
+            </button>
           </div>
           <h1 className="text-3xl md:text-4xl font-bold mb-2" style={{ color: '#7A263A', fontFamily: 'DM Sans', letterSpacing: '-0.02em' }}>
             Your LectureLeaf is ready.
           </h1>
-          {job.title && <p className="text-sm mb-1" style={{ color: '#151515', fontFamily: 'DM Sans', fontWeight: 600 }}>{job.title}</p>}
+          {editingTitle ? (
+            <input
+              autoFocus
+              value={titleDraft}
+              maxLength={150}
+              onChange={(e) => setTitleDraft(e.target.value)}
+              onBlur={saveTitle}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveTitle();
+                if (e.key === 'Escape') setEditingTitle(false);
+              }}
+              className="w-full max-w-2xl px-3 py-1.5 rounded-lg text-sm outline-none mb-1"
+              style={{ background: '#FFFDF9', border: '1.5px solid #C5A46D', color: '#151515', fontFamily: 'DM Sans', fontWeight: 600 }}
+            />
+          ) : (
+            <div className="flex items-center gap-2 mb-1">
+              <p className="text-sm" style={{ color: '#151515', fontFamily: 'DM Sans', fontWeight: 600 }}>{job.title || 'Untitled lecture'}</p>
+              <button
+                onClick={() => { setTitleDraft(job.title ?? ''); setEditingTitle(true); }}
+                aria-label="Rename lecture"
+                title="Rename"
+                style={{ color: '#C5A46D' }}
+              >
+                <svg width="14" height="14" viewBox="0 0 18 18" fill="none">
+                  <path d="M3 13 L11 5 L14 8 L6 16 L2 16 Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" />
+                </svg>
+              </button>
+            </div>
+          )}
           <p style={{ color: '#68645F', fontFamily: 'Inter' }}>
             We found {keptCount} useful visual moments from this lecture.
           </p>
@@ -119,6 +196,36 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
           {error && (
             <p role="alert" className="mt-4 text-sm" style={{ color: '#C05050', fontFamily: 'Inter' }}>{error}</p>
           )}
+          <div className="mt-5 flex items-center gap-3">
+            {confirmDelete ? (
+              <>
+                <span className="text-sm" style={{ color: '#C05050', fontFamily: 'Inter' }}>Delete this lecture and its notes for good?</span>
+                <button
+                  onClick={deleteLecture}
+                  disabled={deleting}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full disabled:opacity-60"
+                  style={{ background: '#C05050', color: '#FFFDF9', fontFamily: 'DM Sans' }}
+                >
+                  {deleting ? 'Deleting…' : 'Yes, delete'}
+                </button>
+                <button
+                  onClick={() => setConfirmDelete(false)}
+                  className="text-xs font-semibold px-3 py-1.5 rounded-full"
+                  style={{ background: '#FFFDF9', color: '#151515', border: '1px solid #E2DDD3', fontFamily: 'DM Sans' }}
+                >
+                  Keep it
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setConfirmDelete(true)}
+                className="text-xs font-semibold px-3 py-1.5 rounded-full"
+                style={{ background: '#FEF5F5', color: '#C05050', border: '1px solid #F5D5D5', fontFamily: 'DM Sans' }}
+              >
+                Delete lecture
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Summary cards */}
@@ -131,7 +238,8 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
           ))}
         </div>
 
-        {/* Tab switcher */}
+        {/* Tab switcher: only useful when there is a second tab to switch to */}
+        {hasTopics && (
         <div className="flex items-center gap-1 p-1 rounded-xl mb-6 w-fit" style={{ background: '#FFFDF9', border: '1px solid #E2DDD3' }}>
           {([['frames', 'Captured moments'], ['topics', 'Topic structure']] as const)
             .filter(([id]) => id === 'frames' || hasTopics)
@@ -152,10 +260,13 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onPreview, onEdi
               </button>
             ))}
         </div>
+        )}
 
         {activeTab === 'frames' || !hasTopics ? (
           <>
-            <h2 className="text-base font-bold mb-4" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Captured moments</h2>
+            {!hasTopics && (
+              <h2 className="text-base font-bold mb-4" style={{ color: '#151515', fontFamily: 'DM Sans' }}>Captured moments</h2>
+            )}
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
               {frames.map((frame) => {
                 const kept = frame.included !== false;

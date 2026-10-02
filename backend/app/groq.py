@@ -47,3 +47,42 @@ def request(path: str, *, attempts: int = 5, **kwargs) -> dict:
                 continue
             raise GroqError(f"HTTP {res.status_code}: {res.text[:200]}")
     raise GroqError(f"Groq kept failing ({last})")
+
+
+_check_cache: dict = {"at": 0.0, "value": None}
+_LLM_FALLBACKS = ["openai/gpt-oss-120b", "llama-3.3-70b-versatile", "openai/gpt-oss-20b", "qwen/qwen3-32b"]
+_WHISPER_FALLBACKS = ["whisper-large-v3-turbo", "whisper-large-v3"]
+
+
+def _pick(wanted: str, fallbacks: list[str], available: set[str]):
+    """The configured model if Groq still offers it, otherwise the first available fallback."""
+    for name in [wanted, *fallbacks]:
+        if name in available:
+            return name
+    return None
+
+
+def check() -> dict:
+    """Is the key valid, and which transcription / notes models can we actually use? Cached for a few minutes.
+
+    Groq retires models from time to time, so the configured names are only a preference."""
+    if not config.GROQ_API_KEY:
+        return {"status": "not_set", "whisper": None, "llm": None}
+    if _check_cache["value"] and time.time() - _check_cache["at"] < 300:
+        return _check_cache["value"]
+    try:
+        with _client() as client:
+            res = client.get("/models", headers={"Authorization": f"Bearer {config.GROQ_API_KEY}"}, timeout=10)
+        if res.status_code in (401, 403):
+            value = {"status": "invalid_key", "whisper": None, "llm": None}
+        elif res.status_code != 200:
+            value = {"status": "error", "http": res.status_code, "whisper": None, "llm": None}
+        else:
+            ids = {m["id"] for m in res.json().get("data", [])}
+            whisper = _pick(config.GROQ_WHISPER_MODEL, _WHISPER_FALLBACKS, ids)
+            llm = _pick(config.GROQ_LLM_MODEL, _LLM_FALLBACKS, ids)
+            value = {"status": "ok" if whisper and llm else "model_missing", "whisper": whisper, "llm": llm}
+    except Exception:
+        return {"status": "unreachable", "whisper": None, "llm": None}  # not cached: try again next time
+    _check_cache.update(at=time.time(), value=value)
+    return value

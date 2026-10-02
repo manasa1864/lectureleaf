@@ -11,6 +11,7 @@ import cv2
 from . import config
 from .db import get_client
 from .errors import UserError
+from . import groq, local_asr, notes_local
 from .groq import GroqError
 from .media import chunk_audio, download_audio, download_video, fetch_info
 from .notes import Section, Segment, build_notes, transcribe
@@ -33,31 +34,75 @@ def fmt_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{sec:02d}" if h else f"{m:02d}:{sec:02d}"
 
 
+def _retry(fn, attempts: int = 4):
+    """Run a Supabase call, retrying brief connection hiccups instead of failing the whole job."""
+    for i in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:
+            if i == attempts - 1:
+                raise
+            log.warning("Supabase call failed (%s), retrying", exc.__class__.__name__)
+            time.sleep(1.5 * (i + 1))
+
+
 def update(job_id: str, **fields) -> None:
-    get_client().table("jobs").update(fields).eq("id", job_id).execute()
+    _retry(lambda: get_client().table("jobs").update(fields).eq("id", job_id).execute())
+
+
+def update_progress(job_id: str, **fields) -> None:
+    """Progress is only cosmetic: never let a failed progress write kill the job."""
+    try:
+        update(job_id, **fields)
+    except Exception:
+        log.warning("could not write progress for %s", job_id)
 
 
 # ─────────────────────────── transcript (runs alongside frame detection) ───────────────────────────
 
-def fetch_transcript(url: str, tmp: str) -> tuple[list[Segment], str]:
-    """Never raises. Returns (segments, warning)."""
-    if not config.GROQ_API_KEY:
-        return [], "Transcription is turned off on this server, so the notes have no key points."
+def fetch_transcript(url: str, tmp: str, duration_s: float = 0) -> tuple[list[Segment], str]:
+    """Never raises. Returns (segments, warning).
+
+    Uses Groq when it is set up and healthy. Otherwise (no key, bad key, rate limited, down) it transcribes
+    offline with a local Whisper model, so notes still get written."""
+    state = groq.check()
+    groq_state = "ok" if state["whisper"] else state["status"]
+    local_ok = local_asr.available() and (not duration_s or duration_s <= config.LOCAL_ASR_MAX_MINUTES * 60)
+    if groq_state != "ok" and not local_ok:
+        why = {"not_set": "Transcription is turned off (no Groq key set)",
+               "invalid_key": "The Groq API key was rejected"}.get(groq_state, "The transcription service is unavailable")
+        return [], f"{why} and offline transcription isn't available, so the notes have no key points."
     try:
         audio = download_audio(url, os.path.join(tmp, "audio"))
         chunks = chunk_audio(audio, os.path.join(tmp, "audio"))
-        segments = transcribe(chunks)
-        if not segments:
-            return [], "No speech was detected in this video, so the notes have no key points."
-        return segments, ""
     except UserError as exc:
         return [], f"{exc} The notes have no key points."
-    except GroqError as exc:
-        log.warning("transcription failed: %s", exc)
-        return [], "Transcription failed, so the notes have no key points."
     except Exception:
-        log.exception("unexpected transcription failure")
-        return [], "Transcription failed, so the notes have no key points."
+        log.exception("audio preparation failed")
+        return [], "The audio couldn't be prepared, so the notes have no key points."
+
+    reason = ""
+    if groq_state == "ok":
+        try:
+            segments = transcribe(chunks)
+            if segments:
+                return segments, ""
+            return [], "No speech was detected in this video, so the notes have no key points."
+        except GroqError as exc:
+            log.warning("Groq transcription failed: %s", exc)
+            reason = "Groq transcription failed"
+    else:
+        reason = {"invalid_key": "The Groq API key was rejected", "unreachable": "Groq couldn't be reached"}.get(groq_state, "")
+    if not local_ok:
+        return [], f"{reason or 'Transcription failed'}, so the notes have no key points."
+    try:
+        segments = local_asr.transcribe(chunks, duration_s)
+    except Exception:
+        log.exception("offline transcription failed")
+        return [], f"{reason or 'Transcription failed'}, and offline transcription failed too, so the notes have no key points."
+    if not segments:
+        return [], "No speech was detected in this video, so the notes have no key points."
+    return segments, (f"{reason}; transcribed offline instead. " if reason else "") 
 
 
 # ─────────────────────────── job runner ───────────────────────────
@@ -78,17 +123,17 @@ class Run:
 def _cleanup(run: Run) -> None:
     db = get_client()
     try:
-        db.table("job_frames").delete().eq("job_id", run.job_id).execute()
+        _retry(lambda: db.table("job_frames").delete().eq("job_id", run.job_id).execute())
         if run.uploaded:
-            db.storage.from_(config.STORAGE_BUCKET).remove(run.uploaded)
+            _retry(lambda: db.storage.from_(config.STORAGE_BUCKET).remove(run.uploaded))
     except Exception:
         log.exception("cleanup failed for job %s", run.job_id)
 
 
 def _upload(run: Run, remote: str, data: bytes, content_type: str) -> None:
-    get_client().storage.from_(config.STORAGE_BUCKET).upload(
+    _retry(lambda: get_client().storage.from_(config.STORAGE_BUCKET).upload(
         remote, data, {"content-type": content_type, "upsert": "true"}
-    )
+    ))
     run.uploaded.append(remote)
 
 
@@ -99,10 +144,11 @@ def run_job(job_id: str, user_id: str, url: str, s: Settings) -> None:
     except UserError as exc:
         _cleanup(run)
         update(job_id, status="error", error=str(exc)[:500])
-    except Exception:
+    except Exception as exc:
         log.exception("job %s failed", job_id)
         _cleanup(run)
-        update(job_id, status="error", error="Something went wrong while processing this lecture. Please try again.")
+        update(job_id, status="error",
+               error=f"Something went wrong while processing this lecture ({exc.__class__.__name__}). Please try again.")
 
 
 def _run(run: Run, url: str, s: Settings) -> None:
@@ -117,7 +163,7 @@ def _run(run: Run, url: str, s: Settings) -> None:
     with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=1) as pool:
         video = download_video(url, os.path.join(tmp, "video"))
         update(job_id, progress=20, step=STEP_DETECTED)
-        transcript_future = pool.submit(fetch_transcript, url, tmp) if s.wants_text else None
+        transcript_future = pool.submit(fetch_transcript, url, tmp, duration) if s.wants_text else None
 
         last_pct = [-1]
 
@@ -126,7 +172,7 @@ def _run(run: Run, url: str, s: Settings) -> None:
             pct = 20 + int(frac * 42)
             if pct != last_pct[0]:
                 last_pct[0] = pct
-                update(job_id, progress=pct)
+                update_progress(job_id, progress=pct)
 
         moments = detect_moments(video, duration, s, scan_progress)
         update(job_id, progress=62, step=STEP_CLEANED)
@@ -148,9 +194,18 @@ def _run(run: Run, url: str, s: Settings) -> None:
             run.check_time()
             update(job_id, progress=74)
             if segments:
-                sections, summary, warn = build_notes(title, times, segments, s.page_density, [m.text for m in moments])
-                if warn:
-                    warnings.append(warn)
+                slide_texts = [m.text for m in moments]
+                if groq.check()["llm"]:
+                    sections, summary, warn = build_notes(title, times, segments, s.page_density, slide_texts)
+                    if warn:
+                        warnings.append(warn)
+                # Whatever the LLM did not provide (or all of it, without Groq) comes from the transcript itself.
+                had_llm = any(sec.heading for sec in sections)
+                sections, summary = notes_local.fill_missing(
+                    title, times, segments, sections, summary, s.page_density, slide_texts)
+                if not had_llm:
+                    warnings.append("Key points were picked from the transcript offline (no AI model), so they are "
+                                    "less polished.")
         update(job_id, progress=82)
 
         base = f"{user_id}/{job_id}"
@@ -169,7 +224,7 @@ def _run(run: Run, url: str, s: Settings) -> None:
                 "ocr_text": m.text or None,
             })
             pdf_frames.append(PdfFrame(int(t), local, sec.heading, sec.key_points))
-        get_client().table("job_frames").insert(rows).execute()
+        _retry(lambda: get_client().table("job_frames").insert(rows).execute())
 
         transcript_path = None
         if segments:
@@ -186,5 +241,5 @@ def _run(run: Run, url: str, s: Settings) -> None:
 
     update(
         job_id, status="done", progress=100, step=STEP_PDF + 1, pdf_path=pdf_remote, summary=summary or None,
-        transcript_path=transcript_path, warning=" ".join(warnings) or None,
+        transcript_path=transcript_path, warning=" ".join(w.strip() for w in warnings if w.strip()) or None,
     )

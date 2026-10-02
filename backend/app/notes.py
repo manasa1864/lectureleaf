@@ -4,7 +4,7 @@ import logging
 from dataclasses import dataclass, field
 
 from . import config
-from .groq import GroqError, request
+from .groq import GroqError, check as groq_check, request
 
 log = logging.getLogger("lectureleaf.notes")
 
@@ -34,7 +34,7 @@ def transcribe(chunks: list[tuple[int, str]]) -> list[Segment]:
         res = request(
             "/audio/transcriptions",
             files={"file": (path.rsplit("/", 1)[-1].rsplit("\\", 1)[-1], data, "audio/mpeg")},
-            data={"model": config.GROQ_WHISPER_MODEL, "response_format": "verbose_json", "temperature": "0"},
+            data={"model": groq_check()["whisper"] or config.GROQ_WHISPER_MODEL, "response_format": "verbose_json", "temperature": "0"},
         )
         for seg in res.get("segments") or []:
             text = (seg.get("text") or "").strip()
@@ -55,15 +55,16 @@ def _section_texts(times: list[int], segments: list[Segment]) -> list[str]:
 
 
 def _chat_json(system: str, user: str) -> dict:
-    res = request(
-        "/chat/completions",
-        json={
-            "model": config.GROQ_LLM_MODEL,
-            "temperature": 0.2,
-            "response_format": {"type": "json_object"},
-            "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
-        },
-    )
+    model = groq_check()["llm"] or config.GROQ_LLM_MODEL
+    body = {
+        "model": model,
+        "temperature": 0.2,
+        "response_format": {"type": "json_object"},
+        "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}],
+    }
+    if model.startswith("openai/gpt-oss"):
+        body["reasoning_effort"] = "low"  # these models think before answering; keep it quick
+    res = request("/chat/completions", json=body)
     try:
         return json.loads(res["choices"][0]["message"]["content"])
     except (KeyError, IndexError, ValueError, TypeError):

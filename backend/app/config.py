@@ -2,7 +2,8 @@ import os
 
 from dotenv import load_dotenv
 
-load_dotenv()
+# override=True: values in backend/.env win over stale variables already set in the Windows/OS environment
+load_dotenv(override=True)
 
 
 def _int(name: str, default: int) -> int:
@@ -21,7 +22,7 @@ SIGNED_URL_TTL = 60 * 60  # seconds
 # Groq (transcription + notes). Without a key the app still makes frame-only PDFs.
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
 GROQ_WHISPER_MODEL = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turbo")
-GROQ_LLM_MODEL = os.environ.get("GROQ_LLM_MODEL", "llama-3.3-70b-versatile")
+GROQ_LLM_MODEL = os.environ.get("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
 
 # YouTube often blocks downloads from cloud IPs. Cookies and/or a proxy are the usual workaround.
 YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "")
@@ -35,3 +36,5 @@ MAX_ACTIVE_JOBS_PER_USER = _int("MAX_ACTIVE_JOBS_PER_USER", 2)
 MAX_DOWNLOAD_MB = _int("MAX_DOWNLOAD_MB", 1000)
 VIDEO_MAX_HEIGHT = _int("VIDEO_MAX_HEIGHT", 720)         # higher = sharper slide text, bigger download
 OCR_BUDGET_S = _int("OCR_BUDGET_S", 240)                  # max seconds per job spent reading text off frames
+LOCAL_WHISPER_MODEL = os.environ.get("LOCAL_WHISPER_MODEL", "auto")  # tiny|base|small|medium, or auto (small up to 25 min, else base)
+LOCAL_ASR_MAX_MINUTES = _int("LOCAL_ASR_MAX_MINUTES", 90)           # longest lecture transcribed offline

@@ -7,10 +7,11 @@ import Processing from './screens/Processing';
 import Results from './screens/Results';
 import Preview from './screens/Preview';
 import Edit from './screens/Edit';
+import Library from './screens/Library';
 import { supabase } from './lib/supabase';
 import { api, type FramePatch, type Job, type JobSettings } from './lib/api';
 
-type Screen = 'landing' | 'setup' | 'processing' | 'results' | 'preview' | 'edit';
+type Screen = 'landing' | 'setup' | 'processing' | 'results' | 'preview' | 'edit' | 'library';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -56,6 +57,36 @@ export default function App() {
     setScreen('results');
   }, []);
 
+  /** Open a lecture from the library. Throws if it can't be loaded, so the library can show why. */
+  const openLecture = async (id: string) => {
+    const j = await api.getJob(id);
+    if (j.status !== 'done') throw new Error('This lecture is not finished processing.');
+    setJob(j);
+    setPdfStale(false); // the server rebuilds an out-of-date PDF itself
+    setScreen('results');
+  };
+
+  /** Open a lecture's PDF straight from the library. */
+  const viewLecture = async (id: string) => {
+    await openLecture(id);
+    setScreen('preview');
+  };
+
+  const renameLecture = async (title: string) => {
+    if (!job) return;
+    const res = await api.renameJob(job.id, title);
+    setJob((j) => (j ? { ...j, title: res.title } : j));
+    setPdfStale(true);
+  };
+
+  const deleteLecture = async () => {
+    if (!job) return;
+    await api.deleteJob(job.id);
+    setJob(null);
+    setJobId(null);
+    setScreen('library');
+  };
+
   /** Save a change to one frame. Updates the screen immediately and puts it back if saving fails. */
   const updateFrame = async (index: number, patch: FramePatch) => {
     if (!job) return;
@@ -92,24 +123,30 @@ export default function App() {
   if (!session) return <Login />;
 
   const signOut = () => supabase.auth.signOut();
+  const email = session.user.email ?? '';
 
   return (
     <>
       {screen === 'landing' && (
         <Landing
-          email={session.user.email ?? ''}
+          email={email}
           onSignOut={signOut}
+          onLibrary={() => setScreen('library')}
           onGenerate={(u) => {
             setUrl(u);
             setScreen('setup');
           }}
         />
       )}
+      {screen === 'library' && (
+        <Library email={email} onOpen={openLecture} onView={viewLecture} onNew={() => setScreen('landing')} onSignOut={signOut} />
+      )}
       {screen === 'setup' && (
         <Setup
           url={url}
           error={startError}
           onStart={startJob}
+          onLibrary={() => setScreen('library')}
           onBack={() => setScreen('landing')}
         />
       )}
@@ -121,6 +158,9 @@ export default function App() {
           job={job}
           onUpdateFrame={updateFrame}
           onGetPdf={getPdf}
+          onRename={renameLecture}
+          onDelete={deleteLecture}
+          onLibrary={() => setScreen('library')}
           onPreview={() => setScreen('preview')}
           onEdit={() => setScreen('edit')}
           onBack={() => setScreen('landing')}

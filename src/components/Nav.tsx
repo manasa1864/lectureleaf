@@ -4,10 +4,11 @@ interface NavProps {
   onGetStarted: () => void;
   email?: string;
   onSignOut?: () => void;
+  onLibrary?: () => void;
   transparent?: boolean;
 }
 
-export default function Nav({ onGetStarted, email, onSignOut, transparent = false }: NavProps) {
+export default function Nav({ onGetStarted, email, onSignOut, onLibrary, transparent = false }: NavProps) {
   return (
     <nav
       className="sticky top-0 z-50 flex items-center justify-between px-6 md:px-10 h-16"
@@ -35,6 +36,22 @@ export default function Nav({ onGetStarted, email, onSignOut, transparent = fals
       </div>
 
       <div className="flex items-center gap-4">
+      {onLibrary && (
+        <button
+          onClick={onLibrary}
+          className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg transition-all"
+          style={{ background: '#FFFDF9', color: '#7A263A', border: '1.5px solid #C5A46D', fontFamily: 'DM Sans', fontWeight: 600 }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = '#F7EEEA')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = '#FFFDF9')}
+        >
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+            <rect x="2" y="2.5" width="4.5" height="13" rx="1" stroke="currentColor" strokeWidth="1.5" />
+            <rect x="8" y="2.5" width="4.5" height="13" rx="1" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M14 4 L16.5 14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          My Library
+        </button>
+      )}
       {onSignOut && (
         <button
           onClick={onSignOut}

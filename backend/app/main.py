@@ -9,13 +9,13 @@ from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from . import config
+from . import config, groq, local_asr
 from .auth import current_user_id
 from .db import get_client, signed_url
 from .media import ffmpeg_available, is_youtube_url
 from .pdf import PdfFrame, build_pdf
 from .pipeline import run_job
-from .schemas import FramePatch, JobCreate, Settings, SignUp
+from .schemas import FramePatch, JobCreate, JobPatch, Settings, SignUp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("lectureleaf.api")
@@ -28,8 +28,17 @@ executor = ThreadPoolExecutor(max_workers=config.MAX_CONCURRENT_JOBS, thread_nam
 async def lifespan(_: FastAPI):
     if not ffmpeg_available():
         log.warning("ffmpeg not found: transcription is disabled until it is installed")
-    if not config.GROQ_API_KEY:
+    status = groq.check()
+    if status["status"] == "not_set":
         log.warning("GROQ_API_KEY not set: PDFs will contain frames only")
+    elif status["status"] == "invalid_key":
+        log.error("GROQ_API_KEY was rejected by Groq (Invalid API Key): PDFs will have no key points. "
+                  "Create a new key at https://console.groq.com/keys and update backend/.env")
+    elif status["status"] == "model_missing":
+        log.error("Groq has no usable %s model. Set GROQ_WHISPER_MODEL / GROQ_LLM_MODEL in backend/.env",
+                  "transcription" if not status["whisper"] else "notes")
+    else:
+        log.info("Groq ready: transcription=%s notes=%s", status["whisper"], status["llm"])
     try:
         # Jobs that were running when the server last stopped can never finish.
         get_client().table("jobs").update(
@@ -74,11 +83,56 @@ def _public(job: dict, with_frames: bool = True) -> dict:
     return out
 
 
+def _library_cards(jobs: list[dict]) -> list[dict]:
+    """List view: each lecture with a cover image and its page count, without loading every frame."""
+    cards = [_public(j, with_frames=False) for j in jobs]
+    if not jobs:
+        return cards
+    rows = (get_client().table("job_frames").select("job_id,position,storage_path,included")
+            .in_("job_id", [j["id"] for j in jobs]).order("position").execute().data)
+    by_job: dict[str, list[dict]] = {}
+    for r in rows:
+        by_job.setdefault(r["job_id"], []).append(r)
+    covers = {}
+    for jid, frames in by_job.items():
+        kept = [f for f in frames if f["included"]]
+        covers[jid] = (kept or frames)[0]["storage_path"]
+    urls = {}
+    if covers:
+        try:
+            signed = get_client().storage.from_(config.STORAGE_BUCKET).create_signed_urls(
+                list(covers.values()), config.SIGNED_URL_TTL)
+            urls = {s["path"]: s.get("signedURL") or s.get("signedUrl") for s in signed if s.get("path")}
+        except Exception:
+            log.exception("could not sign library covers")
+    for card in cards:
+        frames = by_job.get(card["id"], [])
+        card["frame_count"] = sum(1 for f in frames if f["included"])
+        card["thumbnail"] = urls.get(covers.get(card["id"]))
+    return cards
+
+
+def _mark_stale(job_id: str) -> None:
+    """Remember that the saved PDF no longer matches the edited notes, so it is rebuilt before next use."""
+    try:
+        get_client().table("jobs").update({"pdf_stale": True}).eq("id", job_id).execute()
+    except Exception:
+        log.warning("could not set pdf_stale (run the latest supabase/schema.sql)")
+
+
 def _owned(job_id: str, user_id: str) -> dict:
     res = get_client().table("jobs").select("*").eq("id", job_id).eq("user_id", user_id).limit(1).execute()
     if not res.data:
         raise HTTPException(404, "Lecture not found")
     return res.data[0]
+
+
+def _schema_ok() -> bool:
+    try:
+        get_client().table("jobs").select("pdf_stale").limit(1).execute()
+        return True
+    except Exception:
+        return False
 
 
 @app.get("/api/health")
@@ -87,7 +141,9 @@ def health():
         "ok": True,
         "supabase_configured": bool(config.SUPABASE_URL and config.SUPABASE_SERVICE_ROLE_KEY),
         "ffmpeg": ffmpeg_available(),
-        "groq_configured": bool(config.GROQ_API_KEY),
+        "groq": groq.check(),
+        "offline_transcription": local_asr.available(),
+        "schema_up_to_date": _schema_ok(),
     }
 
 
@@ -146,10 +202,24 @@ def create_job(body: JobCreate, user_id: str = Depends(current_user_id)):
 
 
 @app.get("/api/jobs")
-def list_jobs(user_id: str = Depends(current_user_id)):
-    res = (get_client().table("jobs").select("*").eq("user_id", user_id)
-           .order("created_at", desc=True).limit(50).execute())
-    return [_public(j, with_frames=False) for j in res.data]
+def list_jobs(status: str | None = None, user_id: str = Depends(current_user_id)):
+    """The user's lectures, newest first. `?status=done` gives the library."""
+    q = get_client().table("jobs").select("*").eq("user_id", user_id)
+    if status:
+        q = q.eq("status", status)
+    res = q.order("created_at", desc=True).limit(100).execute()
+    return _library_cards(res.data)
+
+
+@app.patch("/api/jobs/{job_id}")
+def rename_job(job_id: str, body: JobPatch, user_id: str = Depends(current_user_id)):
+    _owned(job_id, user_id)
+    title = " ".join(body.title.split())
+    if not title:
+        raise HTTPException(422, "The title can't be empty.")
+    get_client().table("jobs").update({"title": title}).eq("id", job_id).execute()
+    _mark_stale(job_id)  # the title is printed in the PDF
+    return {"ok": True, "title": title}
 
 
 @app.get("/api/jobs/{job_id}")
@@ -163,6 +233,8 @@ def get_pdf(job_id: str, user_id: str = Depends(current_user_id)):
     job = _owned(job_id, user_id)
     if not job.get("pdf_path"):
         raise HTTPException(409, "The PDF isn't ready yet.")
+    if job.get("pdf_stale"):
+        job = _rebuild(job)
     return {"url": signed_url(job["pdf_path"])}
 
 
@@ -172,6 +244,8 @@ def get_pdf_file(job_id: str, user_id: str = Depends(current_user_id)):
     job = _owned(job_id, user_id)
     if not job.get("pdf_path"):
         raise HTTPException(409, "The PDF isn't ready yet.")
+    if job.get("pdf_stale"):
+        job = _rebuild(job)
     data = get_client().storage.from_(config.STORAGE_BUCKET).download(job["pdf_path"])
     return Response(data, media_type="application/pdf", headers={"Cache-Control": "no-store"})
 
@@ -185,13 +259,19 @@ def patch_frame(job_id: str, index: int, body: FramePatch, user_id: str = Depend
     res = (get_client().table("job_frames").update(fields).eq("job_id", job_id).eq("position", index).execute())
     if not res.data:
         raise HTTPException(404, "Frame not found")
+    _mark_stale(job_id)
     return {"ok": True}
 
 
 @app.post("/api/jobs/{job_id}/rebuild")
 def rebuild_pdf(job_id: str, user_id: str = Depends(current_user_id)):
     """Regenerate the PDF from the frames the user kept (after removing frames or adding notes)."""
-    job = _owned(job_id, user_id)
+    job = _rebuild(_owned(job_id, user_id))
+    return {"url": signed_url(job["pdf_path"])}
+
+
+def _rebuild(job: dict) -> dict:
+    job_id = job["id"]
     if job["status"] != "done":
         raise HTTPException(409, "This lecture isn't finished processing.")
     rows = [r for r in get_client().table("job_frames").select("*").eq("job_id", job_id).order("position").execute().data
@@ -211,7 +291,11 @@ def rebuild_pdf(job_id: str, user_id: str = Depends(current_user_id)):
         build_pdf(out, job.get("title") or "Lecture", frames, settings, job.get("summary") or "", job.get("duration_s"))
         with open(out, "rb") as fh:
             bucket.upload(job["pdf_path"], fh.read(), {"content-type": "application/pdf", "upsert": "true"})
-    return {"url": signed_url(job["pdf_path"])}
+    try:
+        get_client().table("jobs").update({"pdf_stale": False}).eq("id", job_id).execute()
+    except Exception:
+        log.warning("could not clear pdf_stale (run the latest supabase/schema.sql)")
+    return {**job, "pdf_stale": False}
 
 
 @app.delete("/api/jobs/{job_id}", status_code=204)

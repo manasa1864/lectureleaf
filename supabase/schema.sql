@@ -88,6 +88,7 @@ create table if not exists public.jobs (
   summary     text,                                    -- AI summary of the lecture
   warning     text,                                    -- non-fatal problems (e.g. no transcript)
   transcript_path text,                                -- storage path of transcript.json
+  pdf_stale   boolean not null default false,          -- notes edited since the PDF was built
   created_at  timestamptz not null default now(),
   updated_at  timestamptz not null default now(),
   constraint jobs_status_check check (status in ('queued', 'processing', 'done', 'error')),
@@ -100,6 +101,7 @@ alter table public.jobs add column if not exists updated_at timestamptz not null
 alter table public.jobs add column if not exists summary text;
 alter table public.jobs add column if not exists warning text;
 alter table public.jobs add column if not exists transcript_path text;
+alter table public.jobs add column if not exists pdf_stale boolean not null default false;
 
 create index if not exists jobs_user_created_idx on public.jobs (user_id, created_at desc);
 

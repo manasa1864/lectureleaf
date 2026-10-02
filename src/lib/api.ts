@@ -2,6 +2,17 @@ import { supabase } from './supabase';
 
 const API_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8000';
 
+/** A lecture in the library list. */
+export interface LectureCard {
+  id: string;
+  url: string;
+  title: string | null;
+  duration_s: number | null;
+  created_at: string;
+  thumbnail: string | null;
+  frame_count: number;
+}
+
 export interface JobFrame {
   index: number;
   seconds: number;
@@ -78,6 +89,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const detail = body?.detail;
     throw new Error(typeof detail === 'string' ? detail : res.status === 429 ? 'Too many requests. Please wait a moment.' : `Request failed (${res.status})`);
   }
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
 }
 
@@ -99,6 +111,10 @@ export const api = {
     request<{ ok: boolean }>('/api/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   createJob: (url: string, settings: JobSettings) =>
     request<{ id: string }>('/api/jobs', { method: 'POST', body: JSON.stringify({ url, settings }) }),
+  listLectures: () => request<LectureCard[]>('/api/jobs?status=done'),
+  renameJob: (id: string, title: string) =>
+    request<{ ok: boolean; title: string }>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  deleteJob: (id: string) => request<void>(`/api/jobs/${id}`, { method: 'DELETE' }),
   getJob: (id: string) => request<Job>(`/api/jobs/${id}`),
   updateFrame: (id: string, index: number, patch: FramePatch) =>
     request<{ ok: boolean }>(`/api/jobs/${id}/frames/${index}`, { method: 'PATCH', body: JSON.stringify(patch) }),

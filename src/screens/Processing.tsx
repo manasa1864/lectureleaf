@@ -183,10 +183,6 @@ export default function Processing({ jobId, url, onComplete, onFail }: Processin
             </button>
           </div>
         )}
-
-        <p className="text-center mt-10 text-xs" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>
-          This usually takes 2–4 minutes for a full lecture.
-        </p>
       </div>
     </div>
   );

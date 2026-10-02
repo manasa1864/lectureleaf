@@ -6,6 +6,7 @@ interface SetupProps {
   url: string;
   error?: string;
   onStart: (settings: JobSettings) => Promise<void> | void;
+  onLibrary?: () => void;
   onBack: () => void;
 }
 
@@ -288,7 +289,7 @@ function PDFStyleCard({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function Setup({ url, error, onStart, onBack }: SetupProps) {
+export default function Setup({ url, error, onStart, onLibrary, onBack }: SetupProps) {
   const [starting, setStarting] = useState(false);
   const videoId = url.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([\w-]{11})/)?.[1];
   // ── Existing state ──
@@ -358,7 +359,7 @@ export default function Setup({ url, error, onStart, onBack }: SetupProps) {
 
   return (
     <div style={{ background: '#F5F1E8', minHeight: '100vh' }}>
-      <Nav onGetStarted={onBack} />
+      <Nav onGetStarted={onBack} onLibrary={onLibrary} />
 
       <div className="max-w-4xl mx-auto px-6 md:px-10 py-10">
         {/* Back */}
@@ -844,9 +845,11 @@ export default function Setup({ url, error, onStart, onBack }: SetupProps) {
 
         {/* ── Start button ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between">
-          <p className="text-sm" role={error ? 'alert' : undefined} style={{ color: error ? '#C05050' : '#C5A46D', fontFamily: 'Inter' }}>
-            {error || 'Estimated time: 2–4 minutes'}
-          </p>
+          {error ? (
+            <p className="text-sm" role="alert" style={{ color: '#C05050', fontFamily: 'Inter' }}>{error}</p>
+          ) : (
+            <span />
+          )}
           <button
             onClick={start}
             disabled={starting}
