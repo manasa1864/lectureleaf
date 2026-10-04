@@ -1,6 +1,19 @@
 import { supabase } from './supabase';
 
-const API_URL = (import.meta.env.VITE_API_URL as string | undefined) || 'http://localhost:8000';
+const configuredApi = import.meta.env.VITE_API_URL as string | undefined;
+const API_URL = (configuredApi || 'http://localhost:8000').replace(/\/+$/, '');
+
+/** A clear message when a deployed site was built without (or with an unusable) backend address. */
+function apiProblem(): string | null {
+  if (import.meta.env.PROD && !configuredApi) {
+    return 'This site was built without a server address. Set VITE_API_URL in the host settings and redeploy.';
+  }
+  const secureSite = typeof window !== 'undefined' && window.location.protocol === 'https:';
+  if (secureSite && API_URL.startsWith('http://') && !/^http:\/\/(localhost|127\.0\.0\.1)/.test(API_URL)) {
+    return 'The server address must start with https:// when the site is served over https.';
+  }
+  return null;
+}
 
 /** A lecture in the library list. */
 export interface LectureCard {
@@ -65,6 +78,8 @@ export interface JobSettings {
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const problem = apiProblem();
+  if (problem) throw new Error(problem);
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
   let res: Response;
@@ -94,6 +109,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 async function fetchBlob(path: string): Promise<Blob> {
+  const problem = apiProblem();
+  if (problem) throw new Error(problem);
   const { data } = await supabase.auth.getSession();
   let res: Response;
   try {
@@ -200,6 +217,8 @@ export interface QResult {
   feedback: string;
   graded_by: 'auto' | 'ai' | 'keyword';
   deductions: { rule: string; marks: number; reason: string }[];
+  /** Strict mode: what the AI invigilator decided about each of the student's rules. */
+  rule_checks?: { rule: string; status: 'followed' | 'broken' | 'not_applicable' | 'unchecked'; marks: number; note: string }[];
   rubric: { point: string; marks: number; awarded: number; comment: string }[] | null;
   skip: { reason: SkipReason; note: string } | null;
   source: { page: number; time: string; heading: string } | null;
@@ -215,7 +234,7 @@ export interface QuizResults {
   skip_reasons: Partial<Record<SkipReason, number>>;
   revise: { page: number | null; time: string; heading: string; awarded: number; marks: number; skipped: number; missed: number }[];
   counts: Record<'correct' | 'partial' | 'wrong' | 'skipped' | 'unanswered', number>;
-  strict: { on: boolean; rules: Rule[]; marks_deducted: number };
+  strict: { on: boolean; rules: Rule[]; marks_deducted: number; answers_checked?: number; ai_invigilator?: boolean };
   ai_graded: boolean;
   keyword_graded: boolean;
   time_limit_s: number | null;

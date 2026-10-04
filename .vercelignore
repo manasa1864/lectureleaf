@@ -1,0 +1,3 @@
+# The backend is deployed separately (see the README), so it is not part of the Vercel upload.
+backend/
+supabase/

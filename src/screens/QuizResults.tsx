@@ -103,7 +103,10 @@ export default function QuizResults({ attempt, title, onRetake, onPractice, onNe
           <div className="rounded-2xl p-5 mb-6" style={card}>
             <h2 className="text-sm font-bold mb-1" style={heading}>Invigilator report</h2>
             <p className="text-xs mb-3" style={muted}>
-              {r.strict.marks_deducted > 0 ? `${r.strict.marks_deducted} marks were deducted for broken rules.` : 'None of your rules were broken. No marks were deducted.'}
+              {(r.strict.answers_checked ?? 0) === 0
+                ? 'No written answers were checked against your rules.'
+                : `${r.strict.ai_invigilator ? 'The AI invigilator' : 'The invigilator (word limits and keywords only, because the AI was not available)'} checked ${r.strict.answers_checked} ${r.strict.answers_checked === 1 ? 'answer' : 'answers'} against your rules. `}
+              {r.strict.marks_deducted > 0 ? `${r.strict.marks_deducted} marks were cut for broken rules.` : (r.strict.answers_checked ?? 0) > 0 ? 'No marks were cut: every rule was followed.' : ''}
             </p>
             <ul className="text-xs space-y-1" style={{ fontFamily: 'Inter', color: '#151515' }}>
               {r.strict.rules.map((rule) => <li key={rule.id}>• {rule.text}</li>)}
@@ -224,11 +227,26 @@ export default function QuizResults({ attempt, title, onRetake, onPractice, onNe
                         </ul>
                       </div>
                     )}
-                    {q.deductions.length > 0 && (
-                      <div className="rounded-lg p-3" style={{ background: '#FEF5F5', border: '1px solid #F5D5D5' }}>
-                        <p className="text-xs font-bold mb-1" style={{ color: '#C05050' }}>Invigilator deductions</p>
-                        <ul className="space-y-0.5 text-xs" style={{ color: '#151515' }}>
-                          {q.deductions.map((d, i) => <li key={i}>−{d.marks} · {d.rule}{d.reason ? <span style={muted}> ({d.reason})</span> : null}</li>)}
+                    {q.rule_checks && q.rule_checks.length > 0 && (
+                      <div className="rounded-lg p-3" style={{ background: q.deductions.length ? '#FEF5F5' : '#F5F1E8', border: `1px solid ${q.deductions.length ? '#F5D5D5' : '#E2DDD3'}` }}>
+                        <p className="text-xs font-bold mb-1.5" style={{ color: q.deductions.length ? '#C05050' : '#68645F', fontFamily: 'DM Sans' }}>
+                          Invigilator{q.deductions.length ? `: marks cut for broken rules` : `: every rule followed`}
+                        </p>
+                        <ul className="space-y-1 text-xs" style={{ color: '#151515' }}>
+                          {q.rule_checks.map((c, i) => (
+                            <li key={i} className="flex gap-2">
+                              <span className="flex-shrink-0" style={{ color: c.status === 'followed' ? '#2F6B3F' : c.status === 'broken' ? '#C05050' : '#9A948B' }}>
+                                {c.status === 'followed' ? '✓' : c.status === 'broken' ? '✗' : '–'}
+                              </span>
+                              <span>
+                                {c.rule}
+                                {c.status === 'broken' && c.marks > 0 ? <b style={{ color: '#C05050' }}> −{c.marks}</b> : null}
+                                {c.status === 'not_applicable' ? <span style={muted}> (did not apply to this question)</span> : null}
+                                {c.status === 'unchecked' ? <span style={muted}> (could not be checked)</span> : null}
+                                {c.note && c.status !== 'not_applicable' ? <span style={muted}> · {c.note}</span> : null}
+                              </span>
+                            </li>
+                          ))}
                         </ul>
                       </div>
                     )}

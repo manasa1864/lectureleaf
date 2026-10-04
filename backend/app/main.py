@@ -1,5 +1,6 @@
 import logging
 import os
+import threading
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -21,8 +22,8 @@ from .schemas import FramePatch, JobCreate, JobPatch, Settings, SignUp
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("lectureleaf.api")
 
-@asynccontextmanager
-async def lifespan(_: FastAPI):
+def _startup_checks() -> None:
+    """Log the state of every provider. Runs in the background so a slow network never delays the server coming up."""
     if not ffmpeg_available():
         log.warning("ffmpeg not found: transcription is disabled until it is installed")
     status = groq.check()
@@ -40,6 +41,11 @@ async def lifespan(_: FastAPI):
         log.error("OPENROUTER_API_KEY was rejected by OpenRouter. Create a new key at https://openrouter.ai/keys")
     elif openrouter.check()["status"] == "ok":
         log.info("OpenRouter ready as the backup AI: %s", openrouter.check()["models"])
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    threading.Thread(target=_startup_checks, daemon=True).start()
     try:
         # Jobs that were running when the server last stopped can never finish.
         get_client().table("jobs").update(
@@ -60,6 +66,7 @@ app.include_router(quiz_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
+    allow_origin_regex=config.CORS_ORIGIN_REGEX or None,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -141,6 +148,12 @@ def _schema_ok() -> bool:
         return True
     except Exception:
         return False
+
+
+@app.get("/api/healthz")
+def healthz():
+    """Instant liveness check for hosting platforms. (/api/health also probes every provider, so it is slower.)"""
+    return {"ok": True}
 
 
 @app.get("/api/health")

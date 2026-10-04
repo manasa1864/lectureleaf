@@ -214,7 +214,7 @@ export default function QuizSetup({ lecture, onBack, onReady, onQuizzes }: QuizS
         <h1 className="text-2xl font-bold mb-2" style={{ ...heading, color: '#7A263A', letterSpacing: '-0.02em' }}>Writing your questions…</h1>
         <p className="text-sm max-w-sm" style={muted}>
           Reading your lecture{notes.trim() || photos.length ? ' and your notes' : ''} and building {total} {total === 1 ? 'question' : 'questions'}.
-          {strict ? ' Your rules are being set up.' : ''}
+          {strict ? ' Your rules are being set up for the invigilator.' : ''}
         </p>
         {written && written.total > 0 && (
           <div className="mt-6 w-64">
@@ -380,7 +380,7 @@ export default function QuizSetup({ lecture, onBack, onReady, onQuizzes }: QuizS
                         {p.reader === 'openrouter' && <p className="text-xs mt-1" style={muted}>Read by an OpenRouter vision model</p>}
                         {p.reader === 'local' && (
                           <p className="text-xs mt-1" style={muted}>
-                            Read with basic OCR, which struggles with handwriting. For better results the server owner can add a free Gemini key (<a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: '#7A263A', textDecoration: 'underline' }}>get one here</a>; see SETUP.md).
+                            Read with basic OCR, which struggles with handwriting. For better results the server owner can add a free Gemini key (<a href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer" style={{ color: '#7A263A', textDecoration: 'underline' }}>get one here</a>; see the README).
                           </p>
                         )}
                       </>
@@ -396,7 +396,7 @@ export default function QuizSetup({ lecture, onBack, onReady, onQuizzes }: QuizS
           <div className="grid sm:grid-cols-2 gap-3">
             {[
               { id: false, name: 'Normal', desc: 'Answer and get marked on correctness.' },
-              { id: true, name: 'Strict', desc: 'You set rules your answers must follow. An invigilator checks them and cuts marks for every rule you break.' },
+              { id: true, name: 'Strict', desc: 'You set the rules your answers must follow. The AI marks like an invigilator: it reads each of your answers against your rules and cuts marks, with a reason, for every rule that is not followed.' },
             ].map((m) => (
               <button key={m.name} type="button" onClick={() => setStrict(m.id)} className="text-left rounded-xl p-4 transition-all"
                 style={{ background: strict === m.id ? '#F7EEEA' : '#F5F1E8', border: `1.5px solid ${strict === m.id ? '#C5A46D' : '#E2DDD3'}` }}>
@@ -410,7 +410,7 @@ export default function QuizSetup({ lecture, onBack, onReady, onQuizzes }: QuizS
             <div className="mt-5">
               <label htmlFor="rules" className="block text-sm font-semibold mb-1" style={heading}>Your rules for every written answer</label>
               <p className="text-xs mb-2" style={muted}>
-                One rule per line: length, keywords that must appear, showing working for numericals, structure of the answer… Each broken rule costs 15% of that question's marks (at most 60% per question). Rules apply to short answers, long answers and numericals with full working.
+                One rule per line, in your own words: length, keywords that must appear, showing working, the structure of the answer, including an example, anything you want held to. The AI invigilator checks each written answer against every rule and decides how much a broken rule costs (up to 25% of that question's marks per rule, at most 60% per question). Rules apply to short answers, long answers and numericals with full working.
               </p>
               <textarea id="rules" value={rules} onChange={(e) => setRules(e.target.value)} rows={4} maxLength={1500}
                 placeholder={'Minimum 60 words\nMust mention: cache, tag, index\nShow all steps of a calculation\nStart with a definition, end with a one-line conclusion'}

@@ -40,8 +40,7 @@ const fmt = (ms: number) => {
 
 /** Which of the student's own rules apply to this question (mirrors the server). */
 const rulesFor = (q: QuizQuestion, rules: Rule[]) =>
-  rules.filter((r) => (q.type === 'short' || q.type === 'long' || (q.type === 'numerical' && q.numerical_format === 'working')) &&
-    (r.kind !== 'working' || q.type === 'numerical'));
+  q.type === 'short' || q.type === 'long' || (q.type === 'numerical' && q.numerical_format === 'working') ? rules : [];
 
 export default function QuizTake({ quizId, onFinished, onExit }: QuizTakeProps) {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
@@ -267,6 +266,7 @@ export default function QuizTake({ quizId, onFinished, onExit }: QuizTakeProps) 
             {strict && typed && myRules.length > 0 && (
               <div className="mt-5 rounded-xl p-4" style={{ background: '#F7EEEA', border: '1px solid #E8D5C0' }}>
                 <p className="text-xs font-bold mb-2" style={{ color: '#7A263A', fontFamily: 'DM Sans' }}>INVIGILATOR · your rules</p>
+                <p className="text-xs mb-2" style={muted}>When you submit, the AI invigilator reads this answer against each rule and cuts marks for any it breaks. Word counts and keywords are shown live.</p>
                 <ul className="space-y-1.5">
                   {myRules.map((r) => {
                     let state: 'ok' | 'bad' | 'later' = 'later';

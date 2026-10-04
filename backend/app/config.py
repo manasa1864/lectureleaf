@@ -17,6 +17,8 @@ SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_SERVICE_ROLE_KEY = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
 STORAGE_BUCKET = os.environ.get("STORAGE_BUCKET", "lectureleaf")
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "http://localhost:5173").split(",") if o.strip()]
+# Also allow any origin matching this regex, e.g. https://.*\.vercel\.app for every Vercel preview deployment.
+CORS_ORIGIN_REGEX = os.environ.get("CORS_ORIGIN_REGEX", "")
 SIGNED_URL_TTL = 60 * 60  # seconds
 
 # Groq (transcription + notes). Without a key the app still makes frame-only PDFs.
@@ -25,7 +27,30 @@ GROQ_WHISPER_MODEL = os.environ.get("GROQ_WHISPER_MODEL", "whisper-large-v3-turb
 GROQ_LLM_MODEL = os.environ.get("GROQ_LLM_MODEL", "openai/gpt-oss-120b")
 
 # YouTube often blocks downloads from cloud IPs. Cookies and/or a proxy are the usual workaround.
-YTDLP_COOKIES_FILE = os.environ.get("YTDLP_COOKIES_FILE", "")
+def _cookies_file() -> str:
+    """A writable cookies file for yt-dlp (it rewrites the file, and secret mounts are read-only).
+    Hosting platforms make files awkward, so the cookies can instead be given as base64 in YTDLP_COOKIES_B64."""
+    import base64
+    import shutil
+    import tempfile
+
+    target = os.path.join(tempfile.gettempdir(), "lectureleaf-yt-cookies.txt")
+    b64 = os.environ.get("YTDLP_COOKIES_B64", "").strip()
+    src = os.environ.get("YTDLP_COOKIES_FILE", "").strip()
+    try:
+        if b64:
+            with open(target, "wb") as fh:
+                fh.write(base64.b64decode(b64))
+            return target
+        if src and os.path.isfile(src):
+            shutil.copyfile(src, target)
+            return target
+    except Exception:
+        pass
+    return ""
+
+
+YTDLP_COOKIES_FILE = _cookies_file()
 YTDLP_PROXY = os.environ.get("YTDLP_PROXY", "")
 
 # Limits
