@@ -22,6 +22,8 @@ _lock = threading.Lock()  # models are shared by all jobs; transcribe one chunk 
 
 
 def available() -> bool:
+    if config.LOCAL_WHISPER_MODEL.strip().lower() == "off":
+        return False
     return importlib.util.find_spec("faster_whisper") is not None
 
 

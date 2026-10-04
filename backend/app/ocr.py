@@ -10,6 +10,8 @@ import threading
 import cv2
 import numpy as np
 
+from . import config
+
 log = logging.getLogger("lectureleaf.ocr")
 logging.getLogger("RapidOCR").setLevel(logging.ERROR)
 
@@ -23,7 +25,7 @@ _failed = False
 
 def _engines():
     global _det, _full, _failed
-    if _failed:
+    if _failed or not config.OCR_ENABLED:  # disabled: never even load the models
         return None, None
     if _det is None:
         try:

@@ -24,6 +24,8 @@ log = logging.getLogger("lectureleaf.api")
 
 def _startup_checks() -> None:
     """Log the state of every provider. Runs in the background so a slow network never delays the server coming up."""
+    if not config.OCR_ENABLED:
+        log.info("Lite mode: reading slide text (OCR) is off")
     if not ffmpeg_available():
         log.warning("ffmpeg not found: transcription is disabled until it is installed")
     status = groq.check()

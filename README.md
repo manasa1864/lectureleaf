@@ -236,6 +236,20 @@ Add your custom domain too if you have one (comma-separated). To also allow Verc
 
 If something fails see [Troubleshooting](#troubleshooting). Optional extras: add a custom domain in Vercel -> Settings -> Domains; in Supabase -> Authentication -> URL Configuration set the Site URL to your Vercel address.
 
+### No budget? Free hosting (lite mode)
+
+A free host's 512 MB of memory is too small for everything, but **only OCR (reading slide text) is that hungry**. In my test the whole lecture job peaked at about **175 MB** in lite mode (and 550 to 600 MB with OCR on). So on a free plan, run the backend in *lite mode* by adding these environment variables:
+
+| Variable | Value | What it does |
+|---|---|---|
+| `OCR_ENABLED` | `false` | skip reading slide text (~400 MB saved). Frames are still chosen, by sharpness and look, but not by how much text they hold |
+| `LOCAL_WHISPER_MODEL` | `off` | no offline speech-to-text fallback (needs 500 MB+), so a `GROQ_API_KEY` is needed for transcripts |
+| `VIDEO_MAX_HEIGHT` | `360` | smaller downloads and frames |
+| `MAX_CONCURRENT_JOBS` | `1` | one lecture at a time |
+| `MAX_DOWNLOAD_MB` | `300` | stay inside the small disk |
+
+On Render, choose the **Free** instance type and add those variables (everything else in Part 1 stays the same). What to expect on a free plan: the service **sleeps after about 15 minutes without visitors** and takes around a minute to wake, it has a **very slow CPU** (0.1), and **YouTube may block downloads** (see below), so treat it as a demo rather than something to rely on. Quizzes, the library and editing run fine in lite mode. For the full-quality experience, run it on your own computer or on a paid 2 GB host.
+
 ### Things to know before deploying
 
 - **YouTube often blocks cloud servers.** Downloads that work on your laptop can fail from a hosting provider with "YouTube is temporarily blocking downloads from our server". It is the biggest deployment risk. Things that help: redeploy now and then to get the newest `yt-dlp`; give the backend your YouTube cookies (`YTDLP_COOKIES_B64`: export `cookies.txt` from a logged-in browser, then in PowerShell `[Convert]::ToBase64String([IO.File]::ReadAllBytes("cookies.txt"))` and paste the result); or route downloads through a proxy (`YTDLP_PROXY`). Cookies carry your logged-in session: use a throwaway account, never commit them, and note that automated downloading may go against YouTube's terms. Even so, a hosted copy can still be blocked.
@@ -276,7 +290,8 @@ Backend (`backend/.env`):
 | `GROQ_WHISPER_MODEL`, `GROQ_LLM_MODEL` | `whisper-large-v3-turbo`, `openai/gpt-oss-120b` | preferences only; the backend picks another available model if one is retired |
 | `GEMINI_API_KEY`, `GEMINI_MODEL` | none, `gemini-2.5-flash` | reads handwritten notes, [aistudio.google.com/apikey](https://aistudio.google.com/apikey) |
 | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL`, `OPENROUTER_VISION_MODEL` | none | backup AI, [openrouter.ai/keys](https://openrouter.ai/keys) |
-| `LOCAL_WHISPER_MODEL` | `auto` | offline transcription model: `tiny`, `base`, `small`, `medium`; `auto` = `small` up to 25 min, else `base` |
+| `LOCAL_WHISPER_MODEL` | `auto` | offline transcription model: `tiny`, `base`, `small`, `medium`; `auto` = `small` up to 25 min, else `base`; `off` disables it (saves memory) |
+| `OCR_ENABLED` | `true` | `false` skips reading slide text: lite mode for small hosts (see Deploy) |
 | `LOCAL_ASR_MAX_MINUTES` | `90` | longest lecture transcribed offline |
 | `VIDEO_MAX_HEIGHT` | `720` | download quality; higher = sharper slide text, bigger download |
 | `OCR_BUDGET_S` | `240` | most seconds per lecture spent reading text off frames |

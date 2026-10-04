@@ -73,3 +73,8 @@ OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
 OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "google/gemini-2.0-flash-exp:free")
 OPENROUTER_SITE_URL = os.environ.get("OPENROUTER_SITE_URL", "http://localhost")
+
+# Lite mode for small (free) hosts: turn off the memory-hungry parts. See the README, "Free hosting".
+# OCR_ENABLED=false skips reading slide text (frames are still chosen, by sharpness and look); it saves ~400 MB.
+OCR_ENABLED = os.environ.get("OCR_ENABLED", "true").strip().lower() not in ("0", "false", "no", "off")
+# LOCAL_WHISPER_MODEL=off disables the offline speech-to-text fallback (it needs 500 MB+).
