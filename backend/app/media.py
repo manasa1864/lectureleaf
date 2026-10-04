@@ -1,5 +1,6 @@
 """Getting video and audio out of YouTube."""
 import glob
+import logging
 import os
 import shutil
 import subprocess
@@ -11,8 +12,12 @@ import yt_dlp
 from . import config
 from .errors import UserError, friendly_download_error
 
+log = logging.getLogger("lectureleaf.media")
+
 YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be", "music.youtube.com"}
 CHUNK_SECONDS = 600
+RELOAD = "needs to be reloaded"  # what yt-dlp says when YouTube rejects the cookies' session
+_cookies_rejected = False       # once YouTube rejects our cookies, stop sending them until the server restarts
 
 
 def is_youtube_url(url: str) -> bool:
@@ -40,20 +45,34 @@ def _opts(tmp: str, name: str, fmt: str) -> dict:
         "socket_timeout": 30,
         "max_filesize": config.MAX_DOWNLOAD_MB * 1024 * 1024,
     }
-    if config.YTDLP_COOKIES_FILE:
+    if config.YTDLP_COOKIES_FILE and not _cookies_rejected:
         opts["cookiefile"] = config.YTDLP_COOKIES_FILE
     if config.YTDLP_PROXY:
         opts["proxy"] = config.YTDLP_PROXY
     return opts
 
 
+def _drop_cookies_if_rejected(exc: Exception) -> bool:
+    """Stale or rotated cookies make YouTube answer "The page needs to be reloaded". Retry without them."""
+    global _cookies_rejected
+    if config.YTDLP_COOKIES_FILE and not _cookies_rejected and RELOAD in str(exc).lower():
+        _cookies_rejected = True
+        log.warning("YouTube rejected the cookies (%s): continuing without them. Export fresh cookies to use them again.", exc)
+        return True
+    return False
+
+
 def fetch_info(url: str) -> dict:
     """Metadata only. Rejects live streams and over-long lectures before anything is downloaded."""
-    try:
-        with yt_dlp.YoutubeDL(_opts("", "info", "best")) as ydl:
-            info = ydl.extract_info(url, download=False, process=False)
-    except Exception as exc:
-        raise friendly_download_error(exc)
+    for attempt in range(2):
+        try:
+            with yt_dlp.YoutubeDL(_opts("", "info", "best")) as ydl:
+                info = ydl.extract_info(url, download=False, process=False)
+            break
+        except Exception as exc:
+            if attempt == 0 and _drop_cookies_if_rejected(exc):
+                continue
+            raise friendly_download_error(exc)
     if not info:
         raise UserError("Couldn't read this video's details.")
     if info.get("is_live") or info.get("live_status") in ("is_live", "is_upcoming"):
@@ -77,6 +96,8 @@ def _download(url: str, tmp: str, name: str, fmt: str) -> str:
                 ydl.download([url])
             break
         except Exception as exc:
+            if _drop_cookies_if_rejected(exc):
+                continue
             # YouTube sometimes refuses a request once and accepts the next: retry those with a pause.
             if attempt < 2 and any(t in str(exc).lower() for t in TRANSIENT):
                 time.sleep(3 * (attempt + 1))
