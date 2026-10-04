@@ -10,12 +10,13 @@ interface ResultsProps {
   onRename: (title: string) => Promise<void>;
   onDelete: () => Promise<void>;
   onLibrary: () => void;
+  onQuiz: () => void;
   onPreview: () => void;
   onEdit: () => void;
   onBack: () => void;
 }
 
-export default function Results({ job, onUpdateFrame, onGetPdf, onRename, onDelete, onLibrary, onPreview, onEdit, onBack }: ResultsProps) {
+export default function Results({ job, onUpdateFrame, onGetPdf, onRename, onDelete, onLibrary, onQuiz, onPreview, onEdit, onBack }: ResultsProps) {
   const [activeTab, setActiveTab] = useState<'frames' | 'topics'>('frames');
   const [downloading, setDownloading] = useState(false);
   const [error, setError] = useState('');
@@ -102,6 +103,16 @@ export default function Results({ job, onUpdateFrame, onGetPdf, onRename, onDele
         </div>
         <Logo size="sm" />
         <div className="flex items-center gap-3">
+          <button
+            onClick={onQuiz}
+            disabled={keptCount === 0}
+            className="text-sm font-medium px-4 py-2 rounded-full transition-all disabled:opacity-50"
+            style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}
+            onMouseEnter={(e) => (e.currentTarget.style.background = '#641E30')}
+            onMouseLeave={(e) => (e.currentTarget.style.background = '#7A263A')}
+          >
+            Generate Quiz
+          </button>
           <button
             onClick={onEdit}
             className="text-sm font-medium px-4 py-2 rounded-full transition-all"

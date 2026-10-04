@@ -8,10 +8,22 @@ import Results from './screens/Results';
 import Preview from './screens/Preview';
 import Edit from './screens/Edit';
 import Library from './screens/Library';
+import QuizSetup from './screens/QuizSetup';
+import QuizTake from './screens/QuizTake';
+import QuizResults from './screens/QuizResults';
+import Quizzes from './screens/Quizzes';
 import { supabase } from './lib/supabase';
-import { api, type FramePatch, type Job, type JobSettings } from './lib/api';
+import { api, type Attempt, type FramePatch, type Job, type JobSettings } from './lib/api';
 
-type Screen = 'landing' | 'setup' | 'processing' | 'results' | 'preview' | 'edit' | 'library';
+type Screen =
+  | 'landing' | 'setup' | 'processing' | 'results' | 'preview' | 'edit' | 'library'
+  | 'quizSetup' | 'quizTake' | 'quizResults' | 'quizzes';
+
+interface QuizContext {
+  quizId: string;
+  jobId: string;
+  title: string | null;
+}
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -22,6 +34,13 @@ export default function App() {
   const [job, setJob] = useState<Job | null>(null);
   const [pdfStale, setPdfStale] = useState(false); // frames were changed after the PDF was built
   const [startError, setStartError] = useState('');
+
+  const [libraryMode, setLibraryMode] = useState<'browse' | 'quiz'>('browse');
+  const [quizLecture, setQuizLecture] = useState<{ id: string; title: string | null } | null>(null);
+  const [quizFrom, setQuizFrom] = useState<'library' | 'results'>('library');
+  const [quizId, setQuizId] = useState<string | null>(null);
+  const [quizAttempt, setQuizAttempt] = useState<Attempt | null>(null);
+  const [quizCtx, setQuizCtx] = useState<QuizContext | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -34,6 +53,10 @@ export default function App() {
         setScreen('landing');
         setJobId(null);
         setJob(null);
+        setQuizId(null);
+        setQuizAttempt(null);
+        setQuizCtx(null);
+        setLibraryMode('browse');
       }
     });
     return () => data.subscription.unsubscribe();
@@ -84,6 +107,7 @@ export default function App() {
     await api.deleteJob(job.id);
     setJob(null);
     setJobId(null);
+    setLibraryMode('browse');
     setScreen('library');
   };
 
@@ -119,6 +143,52 @@ export default function App() {
     return api.getPdfBlob(job.id);
   };
 
+  /* ───────────── quizzes ───────────── */
+
+  const openLibrary = (mode: 'browse' | 'quiz' = 'browse') => {
+    setLibraryMode(mode);
+    setScreen('library');
+  };
+
+  const setupQuiz = (lecture: { id: string; title: string | null }, from: 'library' | 'results') => {
+    setQuizLecture(lecture);
+    setQuizFrom(from);
+    setScreen('quizSetup');
+  };
+
+  const startQuiz = (id: string) => {
+    setQuizId(id);
+    setScreen('quizTake');
+  };
+
+  /** Show a submitted attempt's results, with the quiz's title and lecture for the buttons on that page. */
+  const showResults = async (attempt: Attempt) => {
+    let ctx: QuizContext = { quizId: attempt.quiz_id, jobId: '', title: null };
+    try {
+      const q = await api.getQuiz(attempt.quiz_id);
+      ctx = { quizId: q.id, jobId: q.job_id, title: q.title };
+    } catch {
+      /* the results are still worth showing */
+    }
+    setQuizCtx(ctx);
+    setQuizAttempt(attempt);
+    setScreen('quizResults');
+  };
+
+  const reviewAttempt = async (attemptId: string) => {
+    await showResults(await api.getAttempt(attemptId));
+  };
+
+  const practiceMissed = async () => {
+    if (!quizAttempt || !quizCtx) return;
+    try {
+      const { id } = await api.deriveQuiz(quizCtx.quizId, quizAttempt.id, 'missed_or_skipped');
+      startQuiz(id);
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : 'Could not make a practice quiz');
+    }
+  };
+
   if (!authReady) return <div style={{ background: '#F5F1E8', minHeight: '100vh' }} />;
   if (!session) return <Login />;
 
@@ -131,7 +201,8 @@ export default function App() {
         <Landing
           email={email}
           onSignOut={signOut}
-          onLibrary={() => setScreen('library')}
+          onLibrary={() => openLibrary('browse')}
+          onQuiz={() => openLibrary('quiz')}
           onGenerate={(u) => {
             setUrl(u);
             setScreen('setup');
@@ -139,14 +210,25 @@ export default function App() {
         />
       )}
       {screen === 'library' && (
-        <Library email={email} onOpen={openLecture} onView={viewLecture} onNew={() => setScreen('landing')} onSignOut={signOut} />
+        <Library
+          email={email}
+          mode={libraryMode}
+          onOpen={openLecture}
+          onView={viewLecture}
+          onNew={() => setScreen('landing')}
+          onSignOut={signOut}
+          onGenerateQuiz={() => setLibraryMode('quiz')}
+          onBrowse={() => setLibraryMode('browse')}
+          onQuiz={(l) => setupQuiz(l, 'library')}
+          onQuizzes={() => setScreen('quizzes')}
+        />
       )}
       {screen === 'setup' && (
         <Setup
           url={url}
           error={startError}
           onStart={startJob}
-          onLibrary={() => setScreen('library')}
+          onLibrary={() => openLibrary('browse')}
           onBack={() => setScreen('landing')}
         />
       )}
@@ -160,7 +242,8 @@ export default function App() {
           onGetPdf={getPdf}
           onRename={renameLecture}
           onDelete={deleteLecture}
-          onLibrary={() => setScreen('library')}
+          onLibrary={() => openLibrary('browse')}
+          onQuiz={() => setupQuiz({ id: job.id, title: job.title }, 'results')}
           onPreview={() => setScreen('preview')}
           onEdit={() => setScreen('edit')}
           onBack={() => setScreen('landing')}
@@ -180,6 +263,38 @@ export default function App() {
           onUpdateFrame={updateFrame}
           onBack={() => setScreen('results')}
           onSave={() => setScreen('results')}
+        />
+      )}
+
+      {screen === 'quizSetup' && quizLecture && (
+        <QuizSetup
+          lecture={quizLecture}
+          onBack={() => (quizFrom === 'results' && job ? setScreen('results') : openLibrary('quiz'))}
+          onReady={startQuiz}
+          onQuizzes={() => setScreen('quizzes')}
+        />
+      )}
+      {screen === 'quizTake' && quizId && (
+        <QuizTake quizId={quizId} onFinished={showResults} onExit={() => setScreen('quizzes')} />
+      )}
+      {screen === 'quizResults' && quizAttempt?.results && quizCtx && (
+        <QuizResults
+          attempt={quizAttempt}
+          title={quizCtx.title}
+          onRetake={() => startQuiz(quizCtx.quizId)}
+          onPractice={practiceMissed}
+          onNewQuiz={() => (quizCtx.jobId ? setupQuiz({ id: quizCtx.jobId, title: quizCtx.title }, 'library') : openLibrary('quiz'))}
+          onOpenLecture={() => (quizCtx.jobId ? openLecture(quizCtx.jobId).catch(() => openLibrary('browse')) : openLibrary('browse'))}
+          onQuizzes={() => setScreen('quizzes')}
+        />
+      )}
+      {screen === 'quizzes' && (
+        <Quizzes
+          onStart={startQuiz}
+          onReview={(attemptId) => reviewAttempt(attemptId)}
+          onNew={() => openLibrary('quiz')}
+          onLibrary={() => openLibrary('browse')}
+          onSignOut={signOut}
         />
       )}
     </>

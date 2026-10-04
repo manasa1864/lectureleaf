@@ -11,7 +11,7 @@ import cv2
 from . import config
 from .db import get_client
 from .errors import UserError
-from . import groq, local_asr, notes_local
+from . import groq, llm, local_asr, notes_local
 from .groq import GroqError
 from .media import chunk_audio, download_audio, download_video, fetch_info
 from .notes import Section, Segment, build_notes, transcribe
@@ -195,7 +195,7 @@ def _run(run: Run, url: str, s: Settings) -> None:
             update(job_id, progress=74)
             if segments:
                 slide_texts = [m.text for m in moments]
-                if groq.check()["llm"]:
+                if llm.available():
                     sections, summary, warn = build_notes(title, times, segments, s.page_density, slide_texts)
                     if warn:
                         warnings.append(warn)

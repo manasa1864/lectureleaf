@@ -106,7 +106,154 @@ async function fetchBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+/* ───────────── quizzes ───────────── */
+
+export type QType = 'mcq' | 'msq' | 'short' | 'long' | 'numerical' | 'fill';
+export type NumericalFormat = 'mcq' | 'answer' | 'working';
+export type SkipReason = 'dont_know' | 'unclear_topic' | 'no_formula' | 'unclear_question' | 'out_of_time' | 'other';
+
+export interface QuizConfigIn {
+  n: number;
+  types: QType[];
+  counts: Partial<Record<QType, number>> | null;
+  numerical_format: NumericalFormat | 'random';
+  difficulty: 'easy' | 'medium' | 'hard' | 'mixed';
+  time_limit_min: number | null;
+  strict: boolean;
+  conditions: string;
+  notes_text: string;
+  images: { name: string; data: string }[];
+}
+
+export interface QuizQuestion {
+  id: string;
+  type: QType;
+  difficulty: 'easy' | 'medium' | 'hard';
+  text: string;
+  marks: number;
+  options?: string[];
+  numerical_format?: NumericalFormat;
+  unit?: string;
+}
+
+export interface Rule {
+  id: string;
+  text: string;
+  kind: 'length' | 'keywords' | 'working' | 'structure' | 'other';
+  min_words: number | null;
+  max_words: number | null;
+  keywords: string[];
+}
+
+export interface Quiz {
+  id: string;
+  job_id: string;
+  title: string | null;
+  status: 'generating' | 'ready' | 'error';
+  error: string | null;
+  warning: string | null;
+  created_at: string;
+  config: { difficulty: string | null; time_limit_min: number | null; strict: boolean; numerical_format: string | null; n: number };
+  rules: Rule[];
+  progress?: { done: number; total: number } | null;
+  questions: QuizQuestion[];
+}
+
+export interface AttemptSummary {
+  id: string;
+  submitted_at: string;
+  score: number;
+  max_score: number;
+  percent: number;
+  mode: string;
+}
+
+export interface QuizListItem {
+  id: string;
+  job_id: string;
+  title: string | null;
+  status: string;
+  error: string | null;
+  created_at: string;
+  n_questions: number;
+  strict: boolean;
+  difficulty: string | null;
+  time_limit_min: number | null;
+  attempts: AttemptSummary[];
+  in_progress: string | null;
+}
+
+export type Answer = number | number[] | string;
+export type Skips = Record<string, { reason: SkipReason; note: string }>;
+
+export interface QResult {
+  id: string;
+  type: QType;
+  text: string;
+  options?: string[] | null;
+  marks: number;
+  awarded: number;
+  status: 'correct' | 'partial' | 'wrong' | 'skipped' | 'unanswered';
+  your_answer: string | string[];
+  correct_answer: string | string[];
+  explanation: string;
+  feedback: string;
+  graded_by: 'auto' | 'ai' | 'keyword';
+  deductions: { rule: string; marks: number; reason: string }[];
+  rubric: { point: string; marks: number; awarded: number; comment: string }[] | null;
+  skip: { reason: SkipReason; note: string } | null;
+  source: { page: number; time: string; heading: string } | null;
+}
+
+export interface QuizResults {
+  questions: QResult[];
+  score: number;
+  max_score: number;
+  percent: number;
+  by_type: Record<string, { awarded: number; marks: number; count: number }>;
+  by_page: { page: number | null; time: string; heading: string; awarded: number; marks: number; skipped: number; missed: number }[];
+  skip_reasons: Partial<Record<SkipReason, number>>;
+  revise: { page: number | null; time: string; heading: string; awarded: number; marks: number; skipped: number; missed: number }[];
+  counts: Record<'correct' | 'partial' | 'wrong' | 'skipped' | 'unanswered', number>;
+  strict: { on: boolean; rules: Rule[]; marks_deducted: number };
+  ai_graded: boolean;
+  keyword_graded: boolean;
+  time_limit_s: number | null;
+}
+
+export interface Attempt {
+  id: string;
+  quiz_id: string;
+  status: 'in_progress' | 'submitted';
+  started_at: string;
+  answers: Record<string, Answer>;
+  skips: Skips;
+  server_now: string;
+  results?: QuizResults;
+  score?: number;
+  max_score?: number;
+  percent?: number;
+  time_taken_s?: number;
+  over_time?: boolean;
+  submitted_at?: string;
+}
+
 export const api = {
+  readPhotos: (images: { name: string; data: string }[]) =>
+    request<{ name: string; text: string; chars: number; reader: 'gemini' | 'openrouter' | 'local' }[]>('/api/ocr', { method: 'POST', body: JSON.stringify({ images }) }),
+  createQuiz: (job_id: string, config: QuizConfigIn) =>
+    request<{ id: string }>('/api/quizzes', { method: 'POST', body: JSON.stringify({ job_id, config }) }),
+  getQuiz: (id: string) => request<Quiz>(`/api/quizzes/${id}`),
+  listQuizzes: () => request<QuizListItem[]>('/api/quizzes'),
+  deleteQuiz: (id: string) => request<void>(`/api/quizzes/${id}`, { method: 'DELETE' }),
+  deriveQuiz: (id: string, attempt_id: string, which: 'missed' | 'skipped' | 'missed_or_skipped') =>
+    request<{ id: string }>(`/api/quizzes/${id}/derive`, { method: 'POST', body: JSON.stringify({ attempt_id, which }) }),
+  startAttempt: (quizId: string) => request<Attempt>(`/api/quizzes/${quizId}/attempts`, { method: 'POST' }),
+  saveAttempt: (id: string, body: { answers: Record<string, Answer>; skips: Skips }) =>
+    request<{ ok: boolean }>(`/api/attempts/${id}`, { method: 'PATCH', body: JSON.stringify(body) }),
+  submitAttempt: (id: string, body: { answers: Record<string, Answer>; skips: Skips; time_taken_s: number }) =>
+    request<Attempt>(`/api/attempts/${id}/submit`, { method: 'POST', body: JSON.stringify(body) }),
+  getAttempt: (id: string) => request<Attempt>(`/api/attempts/${id}`),
   signUp: (email: string, password: string) =>
     request<{ ok: boolean }>('/api/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   createJob: (url: string, settings: JobSettings) =>

@@ -173,3 +173,52 @@ create policy "users read own files" on storage.objects for select to authentica
   using (bucket_id = 'lectureleaf' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "users delete own files" on storage.objects for delete to authenticated
   using (bucket_id = 'lectureleaf' and (storage.foldername(name))[1] = auth.uid()::text);
+
+
+-- ───────────────────────── quizzes ─────────────────────────
+-- A quiz is written from one lecture (plus optional notes). Questions hold their own answers and rubrics, so the
+-- API never sends them to the browser until an attempt is submitted.
+create table if not exists public.quizzes (
+  id          uuid primary key,
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  job_id      uuid not null references public.jobs(id) on delete cascade,
+  title       text,
+  config      jsonb not null default '{}'::jsonb,       -- question mix, difficulty, time limit, strict mode...
+  status      text not null default 'generating',       -- generating | ready | error
+  error       text,
+  warning     text,
+  questions   jsonb not null default '[]'::jsonb,
+  conditions  jsonb not null default '[]'::jsonb,       -- strict mode: the student's rules for their answers
+  created_at  timestamptz not null default now(),
+  constraint quizzes_status_check check (status in ('generating', 'ready', 'error'))
+);
+create index if not exists quizzes_user_idx on public.quizzes (user_id, created_at desc);
+create index if not exists quizzes_job_idx on public.quizzes (job_id);
+
+create table if not exists public.quiz_attempts (
+  id            uuid primary key,
+  quiz_id       uuid not null references public.quizzes(id) on delete cascade,
+  user_id       uuid not null references auth.users(id) on delete cascade,
+  status        text not null default 'in_progress',    -- in_progress | submitted
+  mode          text not null default 'normal',         -- normal | strict
+  started_at    timestamptz not null default now(),
+  submitted_at  timestamptz,
+  answers       jsonb not null default '{}'::jsonb,     -- saved as the student goes
+  skips         jsonb not null default '{}'::jsonb,     -- {question id: {reason, note}}
+  results       jsonb,                                  -- per-question marking, breakdowns, revision hints
+  score         numeric,
+  max_score     numeric,
+  percent       numeric,
+  time_taken_s  integer,
+  over_time     boolean,
+  constraint quiz_attempts_status_check check (status in ('in_progress', 'submitted'))
+);
+create index if not exists quiz_attempts_quiz_idx on public.quiz_attempts (quiz_id, submitted_at desc);
+create index if not exists quiz_attempts_user_idx on public.quiz_attempts (user_id);
+
+alter table public.quizzes enable row level security;
+alter table public.quiz_attempts enable row level security;
+drop policy if exists "quizzes read own" on public.quizzes;
+drop policy if exists "attempts read own" on public.quiz_attempts;
+create policy "quizzes read own" on public.quizzes for select using (auth.uid() = user_id);
+create policy "attempts read own" on public.quiz_attempts for select using (auth.uid() = user_id);

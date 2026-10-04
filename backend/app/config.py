@@ -38,3 +38,13 @@ VIDEO_MAX_HEIGHT = _int("VIDEO_MAX_HEIGHT", 720)         # higher = sharper slid
 OCR_BUDGET_S = _int("OCR_BUDGET_S", 240)                  # max seconds per job spent reading text off frames
 LOCAL_WHISPER_MODEL = os.environ.get("LOCAL_WHISPER_MODEL", "auto")  # tiny|base|small|medium, or auto (small up to 25 min, else base)
 LOCAL_ASR_MAX_MINUTES = _int("LOCAL_ASR_MAX_MINUTES", 90)           # longest lecture transcribed offline
+
+# Optional: Google Gemini reads handwritten notes far better than the local OCR. Free key: https://aistudio.google.com/apikey
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+# Optional backup AI provider, used when Groq is busy, unavailable or has no key. Get a key: https://openrouter.ai/keys
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-oss-120b:free")
+OPENROUTER_VISION_MODEL = os.environ.get("OPENROUTER_VISION_MODEL", "google/gemini-2.0-flash-exp:free")
+OPENROUTER_SITE_URL = os.environ.get("OPENROUTER_SITE_URL", "http://localhost")

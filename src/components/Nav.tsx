@@ -5,10 +5,11 @@ interface NavProps {
   email?: string;
   onSignOut?: () => void;
   onLibrary?: () => void;
+  onQuiz?: () => void;
   transparent?: boolean;
 }
 
-export default function Nav({ onGetStarted, email, onSignOut, onLibrary, transparent = false }: NavProps) {
+export default function Nav({ onGetStarted, email, onSignOut, onLibrary, onQuiz, transparent = false }: NavProps) {
   return (
     <nav
       className="sticky top-0 z-50 flex items-center justify-between px-6 md:px-10 h-16"
@@ -36,6 +37,21 @@ export default function Nav({ onGetStarted, email, onSignOut, onLibrary, transpa
       </div>
 
       <div className="flex items-center gap-4">
+      {onQuiz && (
+        <button
+          onClick={onQuiz}
+          className="flex items-center gap-2 text-sm px-4 py-2 rounded-lg transition-all"
+          style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans', fontWeight: 600 }}
+          onMouseEnter={(e) => (e.currentTarget.style.background = '#641E30')}
+          onMouseLeave={(e) => (e.currentTarget.style.background = '#7A263A')}
+        >
+          <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+            <circle cx="9" cy="9" r="7" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M6.8 7.2c.3-1.2 1.2-1.8 2.3-1.8 1.3 0 2.2.8 2.2 1.9 0 1.5-2.2 1.6-2.2 3.1M9.1 13v.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+          Generate Quiz
+        </button>
+      )}
       {onLibrary && (
         <button
           onClick={onLibrary}

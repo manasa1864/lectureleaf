@@ -2,27 +2,24 @@ import logging
 import os
 import tempfile
 import uuid
-from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
-from . import config, groq, local_asr
+from . import config, gemini, groq, llm, local_asr, openrouter
 from .auth import current_user_id
 from .db import get_client, signed_url
 from .media import ffmpeg_available, is_youtube_url
 from .pdf import PdfFrame, build_pdf
 from .pipeline import run_job
+from .pool import executor, quiz_executor
+from .quiz_api import router as quiz_router
 from .schemas import FramePatch, JobCreate, JobPatch, Settings, SignUp
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 log = logging.getLogger("lectureleaf.api")
-
-# Jobs run on a small worker pool; extra jobs wait in 'queued' instead of overloading the machine.
-executor = ThreadPoolExecutor(max_workers=config.MAX_CONCURRENT_JOBS, thread_name_prefix="job")
-
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
@@ -39,18 +36,27 @@ async def lifespan(_: FastAPI):
                   "transcription" if not status["whisper"] else "notes")
     else:
         log.info("Groq ready: transcription=%s notes=%s", status["whisper"], status["llm"])
+    if openrouter.check()["status"] == "invalid_key":
+        log.error("OPENROUTER_API_KEY was rejected by OpenRouter. Create a new key at https://openrouter.ai/keys")
+    elif openrouter.check()["status"] == "ok":
+        log.info("OpenRouter ready as the backup AI: %s", openrouter.check()["models"])
     try:
         # Jobs that were running when the server last stopped can never finish.
         get_client().table("jobs").update(
             {"status": "error", "error": "The server restarted while this was processing. Please try again."}
         ).in_("status", ["queued", "processing"]).execute()
+        get_client().table("quizzes").update(
+            {"status": "error", "error": "The server restarted while this quiz was being written. Please try again."}
+        ).eq("status", "generating").execute()
     except Exception:
         log.exception("could not reset interrupted jobs")
     yield
     executor.shutdown(wait=False, cancel_futures=True)
+    quiz_executor.shutdown(wait=False, cancel_futures=True)
 
 
 app = FastAPI(title="LectureLeaf API", lifespan=lifespan)
+app.include_router(quiz_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -130,6 +136,8 @@ def _owned(job_id: str, user_id: str) -> dict:
 def _schema_ok() -> bool:
     try:
         get_client().table("jobs").select("pdf_stale").limit(1).execute()
+        get_client().table("quizzes").select("id").limit(1).execute()
+        get_client().table("quiz_attempts").select("id").limit(1).execute()
         return True
     except Exception:
         return False
@@ -142,6 +150,9 @@ def health():
         "supabase_configured": bool(config.SUPABASE_URL and config.SUPABASE_SERVICE_ROLE_KEY),
         "ffmpeg": ffmpeg_available(),
         "groq": groq.check(),
+        "gemini": gemini.check(),
+        "openrouter": {k: v for k, v in openrouter.check().items() if not k.startswith("_")},
+        "ai_available": llm.available(),
         "offline_transcription": local_asr.available(),
         "schema_up_to_date": _schema_ok(),
     }

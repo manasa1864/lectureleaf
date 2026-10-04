@@ -9,12 +9,17 @@ interface LibraryProps {
   onView: (id: string) => Promise<void>;
   onNew: () => void;
   onSignOut: () => void;
+  mode: 'browse' | 'quiz';
+  onGenerateQuiz: () => void;   // switch to "choose a lecture for a quiz"
+  onBrowse: () => void;         // leave quiz mode
+  onQuiz: (lecture: { id: string; title: string | null }) => void;
+  onQuizzes: () => void;
 }
 
 const formatDate = (iso: string) =>
   new Date(iso).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
 
-export default function Library({ email, onOpen, onView, onNew, onSignOut }: LibraryProps) {
+export default function Library({ email, onOpen, onView, onNew, onSignOut, mode, onGenerateQuiz, onBrowse, onQuiz, onQuizzes }: LibraryProps) {
   const [lectures, setLectures] = useState<LectureCard[] | null>(null);
   const [error, setError] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
@@ -88,7 +93,21 @@ export default function Library({ email, onOpen, onView, onNew, onSignOut }: Lib
         style={{ background: 'rgba(245,241,232,0.94)', backdropFilter: 'blur(12px)', borderBottom: '1px solid #E2DDD3' }}
       >
         <Logo size="sm" />
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3 sm:gap-4">
+          <button onClick={onQuizzes} className="hidden sm:block text-sm" style={{ color: '#68645F', fontFamily: 'Inter', fontWeight: 500 }}>
+            My quizzes
+          </button>
+          <button
+            onClick={mode === 'quiz' ? onBrowse : onGenerateQuiz}
+            className="flex items-center gap-2 text-sm font-semibold px-4 py-2 rounded-lg transition-all"
+            style={{ background: mode === 'quiz' ? '#F7EEEA' : '#FFFDF9', color: '#7A263A', border: '1.5px solid #C5A46D', fontFamily: 'DM Sans' }}
+          >
+            <svg width="15" height="15" viewBox="0 0 18 18" fill="none">
+            <circle cx="9" cy="9" r="7" stroke="currentColor" strokeWidth="1.5" />
+            <path d="M6.8 7.2c.3-1.2 1.2-1.8 2.3-1.8 1.3 0 2.2.8 2.2 1.9 0 1.5-2.2 1.6-2.2 3.1M9.1 13v.1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+            {mode === 'quiz' ? 'Cancel quiz' : 'Generate Quiz'}
+          </button>
           <button
             onClick={onSignOut}
             title={email}
@@ -111,10 +130,12 @@ export default function Library({ email, onOpen, onView, onNew, onSignOut }: Lib
 
       <div className="max-w-6xl mx-auto px-6 md:px-10 py-10">
         <h1 className="text-3xl font-bold mb-1" style={{ color: '#7A263A', fontFamily: 'DM Sans', letterSpacing: '-0.02em' }}>
-          Your library
+          {mode === 'quiz' ? 'Choose a lecture to quiz yourself on' : 'Your library'}
         </h1>
         <p className="mb-8" style={{ color: '#68645F', fontFamily: 'Inter' }}>
-          {lectures ? (lectures.length ? `${lectures.length} saved ${lectures.length === 1 ? 'lecture' : 'lectures'}` : 'Lectures you process are saved here.') : ' '}
+          {mode === 'quiz'
+            ? 'Pick the notes your quiz should be built from. You can add your own notes on the next step.'
+            : lectures ? (lectures.length ? `${lectures.length} saved ${lectures.length === 1 ? 'lecture' : 'lectures'}` : 'Lectures you process are saved here.') : ' '}
         </p>
 
         {error && (
@@ -148,7 +169,7 @@ export default function Library({ email, onOpen, onView, onNew, onSignOut }: Lib
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
             {lectures.map((l) => (
               <div key={l.id} className="rounded-2xl overflow-hidden flex flex-col" style={{ background: '#FFFDF9', border: '1.5px solid #E2DDD3' }}>
-                <button onClick={() => open(l.id)} className="block text-left" aria-label={`Open ${l.title ?? 'lecture'}`}>
+                <button onClick={() => (mode === 'quiz' ? onQuiz(l) : open(l.id))} className="block text-left" aria-label={`Open ${l.title ?? 'lecture'}`}>
                   <div className="h-40 w-full" style={{ background: '#EDE9E0' }}>
                     {l.thumbnail && <img src={l.thumbnail} alt="" className="w-full h-full object-cover" />}
                   </div>
@@ -193,7 +214,17 @@ export default function Library({ email, onOpen, onView, onNew, onSignOut }: Lib
                     </p>
                   </div>
 
-                  {confirmDelete === l.id ? (
+                  {mode === 'quiz' ? (
+                    <div className="mt-auto">
+                      <button
+                        onClick={() => onQuiz(l)}
+                        className="w-full text-sm font-semibold px-4 py-2.5 rounded-full"
+                        style={{ background: '#7A263A', color: '#FFFDF9', fontFamily: 'DM Sans' }}
+                      >
+                        Make a quiz from this →
+                      </button>
+                    </div>
+                  ) : confirmDelete === l.id ? (
                     <div className="mt-auto flex items-center gap-2">
                       <span className="text-xs flex-1" style={{ color: '#C05050', fontFamily: 'Inter' }}>Delete this lecture for good?</span>
                       <button
@@ -223,6 +254,9 @@ export default function Library({ email, onOpen, onView, onNew, onSignOut }: Lib
                       </button>
                       <button onClick={() => download(l)} disabled={busy === l.id} className="text-xs font-semibold px-3 py-1.5 rounded-full disabled:opacity-60" style={outline}>
                         Download
+                      </button>
+                      <button onClick={() => onQuiz(l)} className="text-xs font-semibold px-3 py-1.5 rounded-full" style={{ background: '#F7EEEA', color: '#7A263A', border: '1px solid #E8D5C0', fontFamily: 'DM Sans' }}>
+                        Quiz
                       </button>
                       <button
                         onClick={() => setConfirmDelete(l.id)}

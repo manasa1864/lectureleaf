@@ -7,6 +7,7 @@ interface LandingProps {
   email?: string;
   onSignOut?: () => void;
   onLibrary?: () => void;
+  onQuiz?: () => void;
 }
 
 // ─── Feature icons (burgundy line icons) ──────────────────────────────────────
@@ -215,7 +216,7 @@ const steps = [
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function Landing({ onGenerate, email, onSignOut, onLibrary }: LandingProps) {
+export default function Landing({ onGenerate, email, onSignOut, onLibrary, onQuiz }: LandingProps) {
   const [url, setUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const [urlError, setUrlError] = useState('');
@@ -236,7 +237,7 @@ export default function Landing({ onGenerate, email, onSignOut, onLibrary }: Lan
 
   return (
     <div style={{ background: '#F5F1E8', minHeight: '100vh' }}>
-      <Nav onGetStarted={go} email={email} onSignOut={onSignOut} onLibrary={onLibrary} />
+      <Nav onGetStarted={go} email={email} onSignOut={onSignOut} onLibrary={onLibrary} onQuiz={onQuiz} />
 
       {/* ── Hero ── */}
       <section className="px-6 md:px-10 pt-16 pb-24 max-w-7xl mx-auto">
