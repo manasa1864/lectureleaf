@@ -62,6 +62,27 @@ def _drop_cookies_if_rejected(exc: Exception) -> bool:
     return False
 
 
+def local_info(path: str, name: str) -> dict:
+    """Title and length of an uploaded video file, with the same limits as a YouTube lecture."""
+    import cv2
+
+    cap = cv2.VideoCapture(path)
+    try:
+        if not cap.isOpened():
+            raise UserError("This file couldn't be read as a video. Try an MP4.")
+        fps = cap.get(cv2.CAP_PROP_FPS) or 0
+        frames = cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0
+        duration = frames / fps if fps > 0 and frames > 0 else 0.0
+    finally:
+        cap.release()
+    if duration > config.MAX_LECTURE_MINUTES * 60:
+        raise UserError(f"This lecture is longer than {config.MAX_LECTURE_MINUTES} minutes, which is the current limit.")
+    if 0 < duration < 20:
+        raise UserError("This video is too short to make study notes from.")
+    title = os.path.splitext(os.path.basename(name))[0].replace("_", " ").strip() or "Uploaded lecture"
+    return {"title": title[:150], "duration": duration}
+
+
 def fetch_info(url: str) -> dict:
     """Metadata only. Rejects live streams and over-long lectures before anything is downloaded."""
     for attempt in range(2):

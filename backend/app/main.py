@@ -1,11 +1,12 @@
 import logging
 import os
+import shutil
 import threading
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 
@@ -224,6 +225,48 @@ def create_job(body: JobCreate, user_id: str = Depends(current_user_id)):
         "id": job_id, "user_id": user_id, "url": url, "settings": body.settings.model_dump(), "status": "queued",
     }).execute()
     executor.submit(run_job, job_id, user_id, url, body.settings)
+    return {"id": job_id}
+
+
+VIDEO_EXTS = (".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v")
+
+
+@app.post("/api/jobs/upload", status_code=202)
+def create_job_from_upload(file: UploadFile = File(...), settings: str = Form("{}"),
+                           user_id: str = Depends(current_user_id)):
+    """Same as /api/jobs, but the lecture is a video file the user uploads instead of a YouTube link."""
+    name = os.path.basename(file.filename or "lecture.mp4")
+    if not name.lower().endswith(VIDEO_EXTS):
+        raise HTTPException(422, "Please upload a video file (MP4, MOV, MKV, WEBM or AVI).")
+    try:
+        s = Settings.model_validate_json(settings or "{}")
+    except Exception:
+        raise HTTPException(422, "The settings were not valid.")
+    db = get_client()
+    active = (db.table("jobs").select("id").eq("user_id", user_id).in_("status", ["queued", "processing"]).execute())
+    if len(active.data) >= config.MAX_ACTIVE_JOBS_PER_USER:
+        raise HTTPException(429, "You already have lectures processing. Wait for one to finish first.")
+    folder = tempfile.mkdtemp(prefix="ll-upload-")
+    path = os.path.join(folder, "lecture" + os.path.splitext(name)[1].lower())
+    limit, size = config.MAX_UPLOAD_MB * 1024 * 1024, 0
+    try:
+        with open(path, "wb") as out:
+            while chunk := file.file.read(1024 * 1024):
+                size += len(chunk)
+                if size > limit:
+                    raise HTTPException(413, f"This video is larger than {config.MAX_UPLOAD_MB} MB. Upload a shorter or lower-resolution clip.")
+                out.write(chunk)
+        if size == 0:
+            raise HTTPException(422, "That file is empty.")
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
+    job_id = str(uuid.uuid4())
+    url = f"upload:{name}"[:500]
+    db.table("jobs").insert({
+        "id": job_id, "user_id": user_id, "url": url, "settings": s.model_dump(), "status": "queued",
+    }).execute()
+    executor.submit(run_job, job_id, user_id, url, s, path)
     return {"id": job_id}
 
 

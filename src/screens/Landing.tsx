@@ -2,8 +2,11 @@ import { useRef, useState } from 'react';
 import Logo from '../components/Logo';
 import Nav from '../components/Nav';
 
+const MAX_UPLOAD_MB = 90; // keep in step with MAX_UPLOAD_MB on the server
+
 interface LandingProps {
   onGenerate: (url: string) => void;
+  onUpload: (file: File) => void;
   email?: string;
   onSignOut?: () => void;
   onLibrary?: () => void;
@@ -216,10 +219,25 @@ const steps = [
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function Landing({ onGenerate, email, onSignOut, onLibrary, onQuiz }: LandingProps) {
+export default function Landing({ onGenerate, onUpload, email, onSignOut, onLibrary, onQuiz }: LandingProps) {
   const [url, setUrl] = useState('');
   const inputRef = useRef<HTMLInputElement>(null);
   const [urlError, setUrlError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const pick = (file?: File) => {
+    if (!file) return;
+    if (!/\.(mp4|mov|mkv|webm|avi|m4v)$/i.test(file.name)) {
+      setUrlError('Please choose a video file (MP4, MOV, MKV, WEBM or AVI).');
+      return;
+    }
+    if (file.size > MAX_UPLOAD_MB * 1024 * 1024) {
+      setUrlError(`That video is larger than ${MAX_UPLOAD_MB} MB. Choose a shorter or lower-resolution clip.`);
+      return;
+    }
+    setUrlError('');
+    onUpload(file);
+  };
 
   // Needs a link first: with an empty field, bring the user to the input instead.
   const go = () => {
@@ -322,6 +340,28 @@ export default function Landing({ onGenerate, email, onSignOut, onLibrary, onQui
             {urlError && (
               <p role="alert" className="text-sm mb-2" style={{ color: '#C05050', fontFamily: 'Inter' }}>{urlError}</p>
             )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="video/*,.mp4,.mov,.mkv,.webm,.avi,.m4v"
+              className="hidden"
+              onChange={(e) => {
+                pick(e.target.files?.[0]);
+                e.target.value = '';
+              }}
+            />
+            <p className="text-sm mb-2" style={{ color: '#68645F', fontFamily: 'Inter' }}>
+              Video not on YouTube, or YouTube not working?{' '}
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                className="font-semibold underline"
+                style={{ color: '#7A263A', fontFamily: 'DM Sans' }}
+              >
+                Upload a video file
+              </button>{' '}
+              (up to {MAX_UPLOAD_MB} MB)
+            </p>
             <p className="text-sm" style={{ color: '#C5A46D', fontFamily: 'Inter' }}>
               No manual screenshots. No endless scrubbing.
             </p>

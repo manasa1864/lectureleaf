@@ -247,6 +247,7 @@ A free host's 512 MB of memory is too small for everything, but **only OCR (read
 | `VIDEO_MAX_HEIGHT` | `360` | smaller downloads and frames |
 | `MAX_CONCURRENT_JOBS` | `1` | one lecture at a time |
 | `MAX_DOWNLOAD_MB` | `300` | stay inside the small disk |
+| `MAX_UPLOAD_MB` | `90` (default) | largest video a user can upload instead of a YouTube link; hosts in front of the server often cap request bodies near 100 MB |
 
 On Render, choose the **Free** instance type and add those variables (everything else in Part 1 stays the same). What to expect on a free plan: the service **sleeps after about 15 minutes without visitors** and takes around a minute to wake, it has a **very slow CPU** (0.1), and **YouTube may block downloads** (see below), so treat it as a demo rather than something to rely on. Quizzes, the library and editing run fine in lite mode. For the full-quality experience, run it on your own computer or on a paid 2 GB host.
 

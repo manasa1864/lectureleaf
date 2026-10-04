@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import shutil
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,7 @@ from .db import get_client
 from .errors import UserError
 from . import groq, llm, local_asr, notes_local
 from .groq import GroqError
-from .media import chunk_audio, download_audio, download_video, fetch_info
+from .media import chunk_audio, download_audio, download_video, fetch_info, local_info
 from .notes import Section, Segment, build_notes, transcribe
 from .pdf import PdfFrame, build_pdf
 from .schemas import Settings
@@ -60,7 +61,7 @@ def update_progress(job_id: str, **fields) -> None:
 
 # ─────────────────────────── transcript (runs alongside frame detection) ───────────────────────────
 
-def fetch_transcript(url: str, tmp: str, duration_s: float = 0) -> tuple[list[Segment], str]:
+def fetch_transcript(url: str, tmp: str, duration_s: float = 0, local_file: str | None = None) -> tuple[list[Segment], str]:
     """Never raises. Returns (segments, warning).
 
     Uses Groq when it is set up and healthy. Otherwise (no key, bad key, rate limited, down) it transcribes
@@ -73,7 +74,8 @@ def fetch_transcript(url: str, tmp: str, duration_s: float = 0) -> tuple[list[Se
                "invalid_key": "The Groq API key was rejected"}.get(groq_state, "The transcription service is unavailable")
         return [], f"{why} and offline transcription isn't available, so the notes have no key points."
     try:
-        audio = download_audio(url, os.path.join(tmp, "audio"))
+        os.makedirs(os.path.join(tmp, "audio"), exist_ok=True)
+        audio = local_file or download_audio(url, os.path.join(tmp, "audio"))  # an upload already has its audio
         chunks = chunk_audio(audio, os.path.join(tmp, "audio"))
     except UserError as exc:
         return [], f"{exc} The notes have no key points."
@@ -137,10 +139,10 @@ def _upload(run: Run, remote: str, data: bytes, content_type: str) -> None:
     run.uploaded.append(remote)
 
 
-def run_job(job_id: str, user_id: str, url: str, s: Settings) -> None:
+def run_job(job_id: str, user_id: str, url: str, s: Settings, local_file: str | None = None) -> None:
     run = Run(job_id, user_id)
     try:
-        _run(run, url, s)
+        _run(run, url, s, local_file)
     except UserError as exc:
         _cleanup(run)
         update(job_id, status="error", error=str(exc)[:500])
@@ -149,21 +151,24 @@ def run_job(job_id: str, user_id: str, url: str, s: Settings) -> None:
         _cleanup(run)
         update(job_id, status="error",
                error=f"Something went wrong while processing this lecture ({exc.__class__.__name__}). Please try again.")
+    finally:
+        if local_file:
+            shutil.rmtree(os.path.dirname(local_file), ignore_errors=True)
 
 
-def _run(run: Run, url: str, s: Settings) -> None:
+def _run(run: Run, url: str, s: Settings, local_file: str | None = None) -> None:
     job_id, user_id = run.job_id, run.user_id
     update(job_id, status="processing", progress=3, step=STEP_LOADED)
-    info = fetch_info(url)
+    info = local_info(local_file, url.removeprefix("upload:")) if local_file else fetch_info(url)
     title = info.get("title") or "Untitled lecture"
     duration = float(info.get("duration") or 0)
     update(job_id, title=title, duration_s=int(duration), progress=8)
 
     warnings: list[str] = []
     with tempfile.TemporaryDirectory() as tmp, ThreadPoolExecutor(max_workers=1) as pool:
-        video = download_video(url, os.path.join(tmp, "video"))
+        video = local_file or download_video(url, os.path.join(tmp, "video"))
         update(job_id, progress=20, step=STEP_DETECTED)
-        transcript_future = pool.submit(fetch_transcript, url, tmp, duration) if s.wants_text else None
+        transcript_future = pool.submit(fetch_transcript, url, tmp, duration, local_file) if s.wants_text else None
 
         last_pct = [-1]
 

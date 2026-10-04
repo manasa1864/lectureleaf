@@ -87,7 +87,8 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     res = await fetch(`${API_URL}${path}`, {
       ...init,
       headers: {
-        'Content-Type': 'application/json',
+        // A file upload sets its own multipart Content-Type (with the boundary).
+        ...(init.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...init.headers,
       },
@@ -277,6 +278,13 @@ export const api = {
     request<{ ok: boolean }>('/api/signup', { method: 'POST', body: JSON.stringify({ email, password }) }),
   createJob: (url: string, settings: JobSettings) =>
     request<{ id: string }>('/api/jobs', { method: 'POST', body: JSON.stringify({ url, settings }) }),
+  /** Start a lecture from a video file instead of a YouTube link. */
+  uploadJob: (file: File, settings: JobSettings) => {
+    const form = new FormData();
+    form.append('file', file);
+    form.append('settings', JSON.stringify(settings));
+    return request<{ id: string }>('/api/jobs/upload', { method: 'POST', body: form });
+  },
   listLectures: () => request<LectureCard[]>('/api/jobs?status=done'),
   renameJob: (id: string, title: string) =>
     request<{ ok: boolean; title: string }>(`/api/jobs/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),

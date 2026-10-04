@@ -30,6 +30,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [screen, setScreen] = useState<Screen>('landing');
   const [url, setUrl] = useState('');
+  const [file, setFile] = useState<File | null>(null); // a video uploaded instead of a YouTube link
   const [jobId, setJobId] = useState<string | null>(null);
   const [job, setJob] = useState<Job | null>(null);
   const [pdfStale, setPdfStale] = useState(false); // frames were changed after the PDF was built
@@ -65,7 +66,7 @@ export default function App() {
   const startJob = async (settings: JobSettings) => {
     setStartError('');
     try {
-      const { id } = await api.createJob(url, settings);
+      const { id } = file ? await api.uploadJob(file, settings) : await api.createJob(url, settings);
       setJobId(id);
       setJob(null);
       setPdfStale(false);
@@ -204,7 +205,13 @@ export default function App() {
           onLibrary={() => openLibrary('browse')}
           onQuiz={() => openLibrary('quiz')}
           onGenerate={(u) => {
+            setFile(null);
             setUrl(u);
+            setScreen('setup');
+          }}
+          onUpload={(f) => {
+            setFile(f);
+            setUrl(f.name);
             setScreen('setup');
           }}
         />

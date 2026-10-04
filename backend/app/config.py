@@ -59,6 +59,7 @@ MAX_JOB_MINUTES = _int("MAX_JOB_MINUTES", 45)             # wall-clock budget fo
 MAX_CONCURRENT_JOBS = _int("MAX_CONCURRENT_JOBS", 2)      # jobs processed at once by this server
 MAX_ACTIVE_JOBS_PER_USER = _int("MAX_ACTIVE_JOBS_PER_USER", 2)
 MAX_DOWNLOAD_MB = _int("MAX_DOWNLOAD_MB", 1000)
+MAX_UPLOAD_MB = _int("MAX_UPLOAD_MB", 90)               # uploaded lecture videos (hosts in front of the server often cap bodies near 100 MB)
 VIDEO_MAX_HEIGHT = _int("VIDEO_MAX_HEIGHT", 720)         # higher = sharper slide text, bigger download
 OCR_BUDGET_S = _int("OCR_BUDGET_S", 240)                  # max seconds per job spent reading text off frames
 LOCAL_WHISPER_MODEL = os.environ.get("LOCAL_WHISPER_MODEL", "auto")  # tiny|base|small|medium, or auto (small up to 25 min, else base)
