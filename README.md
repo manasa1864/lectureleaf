@@ -10,6 +10,15 @@ Paste a lecture link and LectureLeaf watches it for you: it picks out the slides
 
 Click the picture to watch it on Vimeo: [vimeo.com/1232775707](https://vimeo.com/1232775707)
 
+## Live demo
+
+**Try it here: [lectureleaf-ffw93l78d-mg06.vercel.app](https://lectureleaf-ffw93l78d-mg06.vercel.app)**
+
+Sign up with any email and password, then paste a YouTube lecture link or upload a video file. Two things to know about the free hosting:
+
+- The server sleeps when idle, so the first request after a quiet spell can take about a minute.
+- YouTube blocks downloads from cloud servers, so a YouTube link can fail with "YouTube is temporarily blocking downloads". Use **Upload a video file** on the home page (up to 90 MB) when that happens. Notes, PDF, library and quizzes work the same either way.
+
 ---
 
 ## Contents
