@@ -4,6 +4,12 @@ Turn any YouTube lecture into **revision-ready study notes**, then **test yourse
 
 Paste a lecture link and LectureLeaf watches it for you: it picks out the slides, diagrams and board work worth keeping, writes headings and key points from what the lecturer says, and builds a clean PDF. Everything you process is saved to a personal **library** where you can edit the notes by hand. From any saved lecture you can generate a **quiz** (several question types, timed, with an optional strict mode where an AI invigilator marks your answers against rules you set) that is built from the lecture and from your own notes.
 
+## Demo video
+
+[![Watch the LectureLeaf demo (about 8 minutes)](https://i.vimeocdn.com/filter/overlay?src0=https%3A%2F%2Fi.vimeocdn.com%2Fvideo%2F2208284143-a34c188dc74d230cac84aaefa7a0084bceff8a9346decfe641640d9abd712cb2-d_1280x720%3Fregion%3Dus&src1=http%3A%2F%2Ff.vimeocdn.com%2Fp%2Fimages%2Fcrawler_play.png)](https://vimeo.com/1232775707)
+
+Click the picture to watch it on Vimeo: [vimeo.com/1232775707](https://vimeo.com/1232775707)
+
 ---
 
 ## Contents
